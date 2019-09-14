@@ -116,11 +116,19 @@ class FancyMLP(nn.Block):
         for (head, relat, tail) in triple_set:
             sample_source = []
             for head_idx in list(range(self.entity_size)):
-                for tail_idx in list(range(self.entity_size)):
-                    if head_idx == tail_idx:
-                        continue
-                    if (head_idx, relat, tail_idx) not in triple_set:
-                        sample_source.append((head_idx, tail_idx))
+                if head_idx == tail:
+                    continue
+                if (head_idx, relat, tail) not in triple_set:
+                    sample_source.append((head_idx, tail))
+            choice = random.choice(sample_source)
+            negative_sample.append((head, relat, tail, *choice))
+
+            sample_source = []
+            for tail_idx in list(range(self.entity_size)):
+                if head == tail_idx:
+                    continue
+                if (head, relat, tail_idx) not in triple_set:
+                    sample_source.append((head, tail_idx))
             choice = random.choice(sample_source)
             negative_sample.append((head, relat, tail, *choice))
             # TODO
@@ -206,6 +214,24 @@ class FancyMLP(nn.Block):
             f.write('{}-{}-{} \n{} - {} - {} - {} - {}\n\n'.format(
                     str(h_i), str(r_i), str(t_i), str(h), str(r), str(t), 
                     str(self.distance(h, r, t)), str(self.distance(h, r, t).abs().sum())))
+    
+    def predict_with_h_r(self, head_idx, relation_idx, k=3):
+        head = net.entity_embedding(nd.array([head_idx], ctx=net.ctx))
+        relation = net.relation_embedding(nd.array([relation_idx], ctx=net.ctx))
+        tails = net.entity_embedding(nd.array(list(range(net.entity_size)), ctx=self.ctx))
+        candidates = []
+        for tail in tails:
+            candidates.append(net.distance(head, relation, tail).asscalar())
+        candidates = np.array(candidates)
+        net.logger.info(candidates)
+        prediction = []
+        max = candidates.max()
+        for i in range(k):
+            min_idx = candidates.argmin()
+            if candidates[min_idx] != max:
+                prediction.append((min_idx, candidates[min_idx]))
+                candidates[min_idx] = max
+        return prediction
 
 
 def build_dataset(entity_dim=2, relation_dim=2, ctx=None):
@@ -222,6 +248,7 @@ def build_dataset(entity_dim=2, relation_dim=2, ctx=None):
     relation_list.append(Relation(1, 'r2', C, B, nd.ones(shape=(1,relation_dim), ctx=ctx)))
     # relation_list.append(Relation(1, 'r2', B, A, nd.ones(shape=(1,relation_dim), ctx=ctx)))
     return relation_list
+
 
 if __name__ == '__main__':
     logger = Log(10, 'pg', False)
@@ -240,7 +267,7 @@ if __name__ == '__main__':
     net = FancyMLP(entity_size, relation_size,
                         entity_dim, relation_dim,
                         # negative_sampling_rate=0.3, 
-                        margin=1,
+                        margin=2,
                         ctx=ctx, logger=logger)
     net.add_relation_list(data)
     net.initialize(force_reinit=True, ctx=ctx)
@@ -254,15 +281,9 @@ if __name__ == '__main__':
 
     p = []
 
-    for i in range(300):
+    for i in range(200):
         net.normalize_entity_parameters()
         # logger.info('*'*40)
-        # logger.debug(A)
-        # logger.debug(B)
-        # logger.debug(R1)
-        # logger.debug(net.M1.data())
-        # logger.debug(net.M2.data())
-        # net.normalize()
         with autograd.record():
             # for j in range(3):
             output = net(0, 2)
@@ -278,4 +299,7 @@ if __name__ == '__main__':
     net.dump('relations.txt', loss)
     draw(p)
 
-    # logger.debug(net(X))
+    for i in range(5):
+        print(net.predict_with_h_r(i,0))
+    for i in range(5):
+        print(net.predict_with_h_r(i,1))
