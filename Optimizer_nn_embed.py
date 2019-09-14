@@ -1,17 +1,18 @@
-import matplotlib.pyplot as plt
 import numpy as np
-from mxnet import autograd, gluon, init, nd
+from mxnet import autograd, context, gluon, gpu, init, nd
 from mxnet.gluon import loss as gloss
 from mxnet.gluon import nn, rnn
-from mxnet.gluon.nn import LayerNorm
+from mxnet.gluon.nn import Embedding, LayerNorm
+from mxnet.initializer import Initializer
 
 
 def draw(p1): 
+    import matplotlib.pyplot as plt
     plt.figure('Draw')
     plt.plot(p1)  
     plt.draw()  
     plt.pause(1)  
-    plt.savefig("easyplot01.jpg")  
+    plt.savefig("easyplot01.jpg")
     plt.close()
 
 def Log(default_level, log_path, live_stream):
@@ -51,40 +52,29 @@ class Relation(object):
         
 
 class FancyMLP(nn.Block):
-    def __init__(self, entity_size=0, relation_size=0, **kwargs):
+    def __init__(self, entity_size=0, relation_size=0, entity_dim=2, relation_dim=2, ctx=None, logger=None, **kwargs):
         super(FancyMLP, self).__init__(**kwargs)
         self.entity_list = list(range(entity_size))
         self.relation_list = list(range(relation_size))
         self.triple_set = []
-        self.norm_layer = LayerNorm(scale = True)
-
-        # self.dense = nn.Dense(2, activation='relu')
-        # self.M1 = self.params.get_constant('M1', [[1,1],[1,1]])
-        # self.M2 = self.params.get_constant('M2', [[1,1],[1,1]])
-        
-        # self.A = self.params.get('A', shape=(2, 1))
-        # self.B = self.params.get('B', shape=(2, 1))
-        
-        # self.entity_list = []
-        # self.entity_list.append(self.params.get('A', shape=(2, 1)))
-        # self.entity_list.append(self.params.get('B', shape=(2, 1)))
-
-        # self.C = self.params.get('C', shape=(2, 1))
-
-        # self.R1 = self.params.get('R1', shape=(2, 1))
-        # self.R2 = self.params.get('R1', shape=(2, 1))
+        # self.norm_layer = LayerNorm(scale = True)
+        self.entity_size = entity_size
+        self.relation_size = relation_size
+        self.entity_dim = entity_dim
+        self.relation_dim = relation_dim
+        self.entity_embedding = Embedding(entity_size, entity_dim)
+        self.relation_embedding = Embedding(relation_size, relation_dim)
+        self.ctx = ctx
+        self.logger = logger
 
     def add_relation_list(self, new_relation_list:[Relation]):
         for relat in new_relation_list:
-            if type(self.relation_list[relat.idx]) is int:
-                # self.relation_list[relat.idx] = relat.embedding
-                self.relation_list[relat.idx] = self.params.get(relat.tag, shape=(1,3), init=init.Normal(1))
             if type(self.entity_list[relat.head.idx]) is int:
-                # self.entity_list[relat.head.idx] = relat.head.embedding
-                self.entity_list[relat.head.idx] = self.params.get(relat.head.tag, shape=(1,3), init=init.Normal(1))
+                self.entity_list[relat.head.idx] = self.params.get(relat.head.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
+            if type(self.relation_list[relat.idx]) is int:
+                self.relation_list[relat.idx] = self.params.get(relat.tag, shape=(1,self.relation_dim), init=init.One())
             if type(self.entity_list[relat.tail.idx]) is int:
-                # self.entity_list[relat.tail.idx] = relat.tail.embedding
-                self.entity_list[relat.tail.idx] = self.params.get(relat.tail.tag, shape=(1,3), init=init.Normal(1))
+                self.entity_list[relat.tail.idx] = self.params.get(relat.tail.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
             triple = (relat.head.idx, relat.idx, relat.tail.idx)
             self.triple_set.append(triple)
             
@@ -114,48 +104,60 @@ class FancyMLP(nn.Block):
         L = h + r - t
         return L
 
-    # def norm_layer(self, x):
-    #     return x/x.norm()
-        
+    def norm_layer(self, x, dim):
+        return (x/x.norm(axis=-1, keepdims=True))
 
     def forward(self, start=0, end=0):
-        (h_i, r_i, t_i) = self.triple_set[start]
-        h = self.entity_list[h_i].data()
-        r = self.relation_list[r_i].data()
-        t = self.entity_list[t_i].data()
-        h = self.norm_layer(h)
-        r = self.norm_layer(r)
-        t = self.norm_layer(t)
+        # (h_i, r_i, t_i) = self.triple_set[start]
+        h_i = nd.array([triple[0] for triple in self.triple_set], ctx=self.ctx)
+        r_i = nd.array([triple[1] for triple in self.triple_set], ctx=self.ctx)
+        t_i = nd.array([triple[2] for triple in self.triple_set], ctx=self.ctx)
+        self.logger.debug(h_i)     
+        h = self.entity_embedding(h_i)
+        r = self.relation_embedding(r_i)
+        t = self.entity_embedding(t_i)
+        self.logger.debug(h)
+        h = self.norm_layer(h, self.entity_dim)
+        # r = self.norm_layer(r, self.relation_dim)
+        t = self.norm_layer(t, self.entity_dim)
+        self.logger.debug(h)
         # h = self.norm_layer(h).reshape((1, *h.shape))
         # r = self.norm_layer(r).reshape((1, *r.shape))
         # t = self.norm_layer(t).reshape((1, *t.shape))
         L = self.loss_function(h, r, t)
+        self.logger.debug(L)
+        # L = L.norm(axis=-1)
+        # self.logger.debug(L)
         return L
 
     def backward(self):
         print("bingo")
         return 
     
-    def dump(self, path, loss):
+    def dump(self, path, loss, ctx):
         with open(path, 'w') as f:
-            for (h_i, r_i, t_i) in self.triple_set:
-                h = self.entity_list[h_i].data()
-                r = self.relation_list[r_i].data()
-                t = self.entity_list[t_i].data()
-                h = self.norm_layer(h)
-                r = self.norm_layer(r)
-                t = self.norm_layer(t)
-                f.write('{}-{}-{} \n{} - {} - {} - {}\n\n'.format(str(h_i), str(r_i), str(t_i), str(h), str(r), str(t), str(loss(self.loss_function(h, r, t), nd.zeros(shape=(1,3))))))
+            h_i = nd.array([triple[0] for triple in self.triple_set], ctx=ctx)
+            r_i = nd.array([triple[1] for triple in self.triple_set], ctx=ctx)
+            t_i = nd.array([triple[2] for triple in self.triple_set], ctx=ctx)
+            # self.logger.debug(h_i)     
+            h = self.entity_embedding(h_i)
+            r = self.relation_embedding(r_i)
+            t = self.entity_embedding(t_i)
+            # self.logger.debug(h)
+            h = self.norm_layer(h, self.entity_dim)
+            # r = self.norm_layer(r, self.relation_dim)
+            t = self.norm_layer(t, self.entity_dim)
+            f.write('{}-{}-{} \n{} - {} - {} - {}\n\n'.format(str(h_i), str(r_i), str(t_i), str(h), str(r), str(t), str(loss(self.loss_function(h, r, t), nd.zeros(shape=(self.entity_dim,self.entity_size), ctx=ctx)))))
 
 
-def build_dataset():
+def build_dataset(entity_dim=2, relation_dim=2, ctx=None):
     relation_list = []
-    A = Entity(0, 'A', nd.ones(shape=(1,3)))
-    B = Entity(1, 'B', nd.ones(shape=(1,3)))
-    C = Entity(2, 'C', nd.ones(shape=(1,3)))
-    relation_list.append(Relation(0, 'r1', A, B, nd.ones(shape=(1,3))))
-    relation_list.append(Relation(1, 'r2', B, C, nd.ones(shape=(1,3))))
-    relation_list.append(Relation(1, 'r2', C, A, nd.ones(shape=(1,3))))
+    A = Entity(0, 'A', nd.ones(shape=(1,entity_dim), ctx=ctx))
+    B = Entity(1, 'B', nd.ones(shape=(1,entity_dim), ctx=ctx))
+    C = Entity(2, 'C', nd.ones(shape=(1,entity_dim), ctx=ctx))
+    relation_list.append(Relation(0, 'r1', A, B, nd.ones(shape=(1,relation_dim), ctx=ctx)))
+    relation_list.append(Relation(0, 'r1', B, C, nd.ones(shape=(1,relation_dim), ctx=ctx)))
+    relation_list.append(Relation(1, 'r2', C, A, nd.ones(shape=(1,relation_dim), ctx=ctx)))
     return relation_list
 
 if __name__ == '__main__':
@@ -170,7 +172,14 @@ if __name__ == '__main__':
 
     # R1 = nd.array([[1, 1]]).T
 
-    Y = nd.zeros(shape=(1,3))
+    entity_size = 3
+    relation_size = 2
+    entity_dim = 2
+    relation_dim = 2
+
+    ctx = gpu(0)
+
+    Y = nd.zeros(shape=(entity_size,entity_dim), ctx=ctx)
 
     # A.attach_grad()
     # B.attach_grad()
@@ -180,18 +189,19 @@ if __name__ == '__main__':
     # M1.attach_grad()
     # M2.attach_grad()
 
-    data = build_dataset()
+    data = build_dataset(entity_dim=entity_dim, relation_dim=relation_dim, ctx=ctx)
 
-    net = FancyMLP(3, 3)
+    net = FancyMLP(entity_size, relation_size,
+                        entity_dim, relation_dim, ctx=ctx, logger=logger)
     net.add_relation_list(data)
-    net.initialize()
+    net.initialize(force_reinit=True, ctx=ctx)
 
-    trainer = gluon.Trainer(net.collect_params(), 'adam',
+    trainer = gluon.Trainer(net.collect_params(), 'Adagrad',
                             {'learning_rate': 0.01})
-    loss = gloss.L2Loss()
+    loss = gloss.L1Loss()
 
     p = []
-    for i in range(100):
+    for i in range(300):
         # logger.info('*'*40)
         # logger.debug(A)
         # logger.debug(B)
@@ -199,20 +209,16 @@ if __name__ == '__main__':
         # logger.debug(net.M1.data())
         # logger.debug(net.M2.data())
         # net.normalize()
-        l = 0
         with autograd.record():
             # for j in range(3):
             output = net(0, 2)
-            l = l + loss(output, Y)
-            output = net(1, 2)
-            l = l + loss(output, Y)
-            output = net(2, 2)
-            l = l + loss(output, Y)
+            l = loss(output, Y).abs().sum()
             logger.info('epoch {}: {}'.format(str(i), str(l.asscalar())))
             p.append(l.asscalar())
+            # print(l)
         l.backward()
-        trainer.step(3)
+        trainer.step(relation_size, True)
     draw(p)
-    net.dump('relations.txt',loss)
+    net.dump('relations.txt', loss, ctx)
 
     # logger.debug(net(X))
