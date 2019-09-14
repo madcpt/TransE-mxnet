@@ -1,9 +1,10 @@
+import math
+
 import numpy as np
-from mxnet import autograd, context, cpu, gluon, gpu, init, nd
+from mxnet import autograd, context, cpu, gluon, gpu, init, initializer, nd
 from mxnet.gluon import loss as gloss
 from mxnet.gluon import nn, rnn
 from mxnet.gluon.nn import Embedding, LayerNorm
-from mxnet.initializer import Initializer
 
 
 def draw(p1): 
@@ -62,8 +63,8 @@ class FancyMLP(nn.Block):
         self.relation_size = relation_size
         self.entity_dim = entity_dim
         self.relation_dim = relation_dim
-        self.entity_embedding = Embedding(entity_size, entity_dim)
-        self.relation_embedding = Embedding(relation_size, relation_dim)
+        self.entity_embedding = Embedding(entity_size, entity_dim, weight_initializer=initializer.Uniform(6.0/math.sqrt(entity_dim)))
+        self.relation_embedding = Embedding(relation_size, relation_dim, weight_initializer=initializer.Uniform(6.0/math.sqrt(entity_dim)))
         self.negative_sampling_rate=negative_sampling_rate
         self.margin = margin
         self.ctx = ctx
@@ -71,43 +72,19 @@ class FancyMLP(nn.Block):
 
     def add_relation_list(self, new_relation_list:[Relation]):
         for relat in new_relation_list:
-            if type(self.entity_list[relat.head.idx]) is int:
-                self.entity_list[relat.head.idx] = self.params.get(relat.head.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
-            if type(self.relation_list[relat.idx]) is int:
-                self.relation_list[relat.idx] = self.params.get(relat.tag, shape=(1,self.relation_dim), init=init.Uniform(1))
-            if type(self.entity_list[relat.tail.idx]) is int:
-                self.entity_list[relat.tail.idx] = self.params.get(relat.tail.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
+            # if type(self.entity_list[relat.head.idx]) is int:
+            #     self.entity_list[relat.head.idx] = self.params.get(relat.head.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
+            # if type(self.relation_list[relat.idx]) is int:
+            #     self.relation_list[relat.idx] = self.params.get(relat.tag, shape=(1,self.relation_dim), init=init.Uniform(1))
+            # if type(self.entity_list[relat.tail.idx]) is int:
+            #     self.entity_list[relat.tail.idx] = self.params.get(relat.tail.tag, shape=(1,self.entity_dim), init=init.Uniform(1))
             triple = (relat.head.idx, relat.idx, relat.tail.idx)
             self.triple_set.append(triple)
             
-    # def normalize(self):
-    #     for (i, e) in enumerate(self.entity_list):
-    #         if type(e) is not int:
-    #             self.entity_list[i] = e.data() / e.data().norm()
-    #             # print(e.data())
 
-    # def take_log(self, h, r, t, M1 = None, M2 = None):
-    #     logger.debug('h: ' + str(h))
-    #     logger.debug('t: ' + str(r))
-    #     logger.debug('r' + str(t))
-    #     if M1 is not None:
-    #         logger.debug('M1' + str(M1))
-    #     if M2 is not None:
-    #         logger.debug('M2' + str(M2))
-
-    # def loss_function(self, h, r, t, M1, M2):
-    #     self.take_log(h, r, t, M1, M2)
-    #     ht = nd.dot(M1, h) + nd.dot(M2, t)
-    #     L = nd.dot(r.T, nd.tanh(ht))
-    #     return L
-
-    # def distance(self, h, r, t):
-    #     # self.take_log(h, r, t)
-    #     D = h + r - t
-    #     return D
-    def distance(self, h, r, t):
+    def distance(self, h, r, t, ord=1):
         # self.take_log(h, r, t)
-        D = (h + r - t).norm(ord=2, axis=-1)
+        D = (h + r - t).norm(ord=ord, axis=-1)
         return D
 
     def loss_function(self, h, r, t, h_hat, t_hat):
@@ -115,6 +92,7 @@ class FancyMLP(nn.Block):
         # print(nd.array(margin + self.distance(h,r,t) - self.distance(h_hat,r,t_hat), self.ctx))
         # print(nd.maximum(nd.array(margin + self.distance(h,r,t) - self.distance(h_hat,r,t_hat), self.ctx), 0))
         L = nd.maximum(nd.array(self.margin + self.distance(h,r,t) - self.distance(h_hat,r,t_hat), self.ctx), 0)
+        # print(self.distance(h,r,t) - self.distance(h_hat,r,t_hat))
         return L
 
     # def negative_sampling(self, triple_set:[int], negative_sampling_rate=0.5):
@@ -153,6 +131,12 @@ class FancyMLP(nn.Block):
         # return (x/x.norm(axis=-1, keepdims=True))
         return x
 
+    def normalize_relation_parameters(self):
+        for tag in list(self.relation_embedding.params):
+            # logger.debug(self.relation_embedding.params[tag].data())
+            weight = self.relation_embedding.params[tag]
+            self.relation_embedding.params[tag].set_data(weight.data()/weight.data().norm(axis=-1, keepdims=True))
+    
     def normalize_entity_parameters(self):
         for tag in list(self.entity_embedding.params):
             # logger.debug(self.entity_embedding.params[tag].data())
@@ -206,19 +190,19 @@ class FancyMLP(nn.Block):
         print("bingo")
         return 
     
-    def dump(self, path, loss, ctx):
+    def dump(self, path, loss):
         with open(path, 'w') as f:
-            h_i = nd.array([triple[0] for triple in self.triple_set], ctx=ctx)
-            r_i = nd.array([triple[1] for triple in self.triple_set], ctx=ctx)
-            t_i = nd.array([triple[2] for triple in self.triple_set], ctx=ctx)
-            # self.logger.debug(h_i)     
+            h_i = nd.array([triple[0] for triple in self.triple_set], ctx=self.ctx)
+            r_i = nd.array([triple[1] for triple in self.triple_set], ctx=self.ctx)
+            t_i = nd.array([triple[2] for triple in self.triple_set], ctx=self.ctx)
+
             h = self.entity_embedding(h_i)
             r = self.relation_embedding(r_i)
             t = self.entity_embedding(t_i)
-            # self.logger.debug(h)
+
             h = self.norm_layer(h, self.entity_dim)
-            # r = self.norm_layer(r, self.relation_dim)
             t = self.norm_layer(t, self.entity_dim)
+
             f.write('{}-{}-{} \n{} - {} - {} - {} - {}\n\n'.format(
                     str(h_i), str(r_i), str(t_i), str(h), str(r), str(t), 
                     str(self.distance(h, r, t)), str(self.distance(h, r, t).abs().sum())))
@@ -244,8 +228,8 @@ if __name__ == '__main__':
 
     entity_size = 5
     relation_size = 2
-    entity_dim = 2
-    relation_dim = 2
+    entity_dim = 10
+    relation_dim = 10
 
     ctx = gpu(0)
 
@@ -255,19 +239,22 @@ if __name__ == '__main__':
 
     net = FancyMLP(entity_size, relation_size,
                         entity_dim, relation_dim,
-                        negative_sampling_rate=0.3, 
+                        # negative_sampling_rate=0.3, 
                         margin=1,
                         ctx=ctx, logger=logger)
     net.add_relation_list(data)
     net.initialize(force_reinit=True, ctx=ctx)
 
-    trainer = gluon.Trainer(net.collect_params(), 'Adagrad',
-                            {'learning_rate': 0.000001})
+    trainer = gluon.Trainer(net.collect_params(), 'sgd',
+                            {'learning_rate': 0.01})
+
+    net.normalize_relation_parameters()
+
     loss = gloss.L2Loss()
 
     p = []
 
-    for i in range(600):
+    for i in range(300):
         net.normalize_entity_parameters()
         # logger.info('*'*40)
         # logger.debug(A)
@@ -282,13 +269,13 @@ if __name__ == '__main__':
             logger.debug(output)
             l = loss(output, nd.zeros(output.shape, ctx=ctx))
             logger.debug(l)
-            l = l.sum()
-            logger.info('epoch {}: {}'.format(str(i), str(l.asscalar())))
+            logger.info('epoch {}: {}'.format(str(i), str(l.sum().asscalar())))
+            l = l.mean()
             p.append(l.asscalar())
             # print(l)
         l.backward()
-        trainer.step(relation_size, True)
-    net.dump('relations.txt', loss, ctx)
+        trainer.step(1)
+    net.dump('relations.txt', loss)
     draw(p)
 
     # logger.debug(net(X))
