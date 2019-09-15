@@ -16,24 +16,4 @@ def Log(default_level, log_path, live_stream):
     if live_stream is not None and live_stream == True:
         stream_handler = logging.StreamHandler()
         logger.addHandler(stream_handler)
-    
-    # self.__logger = logger
-    # self.__log_path = log_path
-    # self.__live_stream = live_stream
     return logger
-
-    
-    # def info(self, message):
-    #     self.__logger.info(message)
-        
-    # def debug(self, message):
-    #     self.__logger.debug(message)
-        
-    # def warning(self, message):
-    #     self.__logger.warning(message)
-        
-    # def error(self, message):
-    #     self.__logger.error(message)
-        
-    # def critical(self, message):
-    #     self.__logger.critical(message)
