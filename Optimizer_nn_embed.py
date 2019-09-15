@@ -379,7 +379,7 @@ if __name__ == '__main__':
         print(total)
         print(tail)
         # TODO
-
+    
     # for i in range(5):
     #     print(net.predict_with_h_r(i,0))
     # for i in range(5):
