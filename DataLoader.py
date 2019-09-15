@@ -16,6 +16,10 @@ class DataLoader(object):
         self.train_triple = []
         self.valid_triple = []
         self.test_triple = []
+        self.train_triple_size = []
+        self.valid_triple_size = []
+        self.test_triple_size = []
+        
 
     def load_all(self):
         with open(self.train_path, 'r') as f:
@@ -67,7 +71,9 @@ class DataLoader(object):
                                 for i in self.test_list
                                 if (i[0] in self.entity_map.keys() and i[1] in self.relation_map.keys() and
                                     i[2] in self.entity_map.keys())]
-        
+        self.train_triple_size = len(self.train_triple)
+        self.valid_triple_size = len(self.valid_triple)
+        self.test_triple_size = len(self.test_triple)
         
         
 

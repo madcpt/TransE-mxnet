@@ -1,4 +1,5 @@
 import math
+import time
 
 import numpy as np
 from mxnet import autograd, context, cpu, gluon, gpu, init, initializer, nd
@@ -36,7 +37,7 @@ class FancyMLP(nn.Block):
         self.logger = logger
 
     def load_relation_data(self, relation_data:list, mode='complex', type='train'):
-        if mode == 'complex':
+        if mode == 'simple':
             for relat in relation_data:
                 triple = (relat.head.idx, relat.idx, relat.tail.idx)
                 if type=='train':
@@ -45,7 +46,7 @@ class FancyMLP(nn.Block):
                     self.valid_triple_set.append(triple)
                 if type=='test':
                     self.test_triple_set.append(triple)
-        if mode == 'simple':
+        if mode == 'complex':
             if type=='train':
                 self.train_triple_set.extend(relation_data)
             if type=='valid':
@@ -106,11 +107,13 @@ class FancyMLP(nn.Block):
             weight = self.entity_embedding.params[tag]
             self.entity_embedding.params[tag].set_data(weight.data()/weight.data().norm(axis=-1, keepdims=True))
 
-    def forward(self, start=0, end=0):
+    def forward(self, start=0, end=10):
         # (h_i, r_i, t_i) = self.train_triple_set[start]
         new_train_triple_set = []
         while new_train_triple_set == []:
-            new_train_triple_set = self.negative_sampling(self.train_triple_set, self.negative_sampling_rate)
+            new_train_triple_set = self.negative_sampling(
+                    self.train_triple_set[start:end], self.negative_sampling_rate)
+        logger.debug(new_train_triple_set)
         h_i = nd.array([triple[0] for triple in new_train_triple_set], ctx=self.ctx)
         r_i = nd.array([triple[1] for triple in new_train_triple_set], ctx=self.ctx)
         t_i = nd.array([triple[2] for triple in new_train_triple_set], ctx=self.ctx)
@@ -191,41 +194,46 @@ def build_simple_dataset(entity_dim=2, relation_dim=2, ctx=None):
 
 
 if __name__ == '__main__':
-    logger = Log(10, 'pg', False)
-
-    # entity_size = 5
-    # relation_size = 2
-    # entity_dim = 10
-    # relation_dim = 10
+    logger = Log(20, 'pg', False)
 
     ctx = gpu(0)
+    mode = 'complex'
 
-    # Y = nd.zeros(shape=(entity_size,entity_dim), ctx=ctx)
-
-    loader = DataLoader()
-    print('Start loading data from {}'.format(loader.train_path))
-    print('Start loading data from {}'.format(loader.valid_path))
-    print('Start loading data from {}'.format(loader.test_path))
-    loader.load_all()
-    print('Start preprocessing...')
-    loader.preprocess()
-
-    entity_size = loader.entity_size
-    relation_size = loader.relation_size
-    entity_dim = 50
-    relation_dim = 50
-
-    train_data = loader.train_triple
-    print('Loading completed')
-
-    # data = build_simple_dataset(entity_dim=entity_dim, relation_dim=relation_dim, ctx=ctx)
-
+    if mode ==  'simple':
+        entity_size = 5
+        relation_size = 2
+        entity_dim = 3
+        relation_dim = 3
+        batch_size = 2
+        train_data = build_simple_dataset(entity_dim=entity_dim, 
+                                relation_dim=relation_dim, ctx=ctx)
+        train_triple_size = len(train_data)
+        total_batch_num = train_triple_size //  batch_size + 1
+    elif mode == 'complex':
+        loader = DataLoader()
+        print('Start loading data from {}'.format(loader.train_path))
+        print('Start loading data from {}'.format(loader.valid_path))
+        print('Start loading data from {}'.format(loader.test_path))
+        loader.load_all()
+        print('Start preprocessing...')
+        loader.preprocess()
+        entity_size = loader.entity_size
+        relation_size = loader.relation_size
+        train_triple_size = loader.train_triple_size
+        entity_dim = 50
+        relation_dim = 50
+        batch_size = 100
+        total_batch_num = train_triple_size // batch_size + 1
+        train_data = loader.train_triple
+        print('Loading completed')
+    
     net = FancyMLP(entity_size, relation_size,
                         entity_dim, relation_dim,
                         # negative_sampling_rate=0.3, 
                         margin=2,
                         ctx=ctx, logger=logger)
-    net.load_relation_data(train_data, mode='simple', type='train')
+    
+    net.load_relation_data(train_data, mode=mode, type='train')
     print('Initializing model...')
     net.initialize(force_reinit=True, ctx=ctx)
 
@@ -240,23 +248,50 @@ if __name__ == '__main__':
     p = []
 
     print('Start iteration:')
-    
-    for i in range(1):
+
+    all_start = time.time()
+    for epoch in range(1):
+        epoch_loss = 0
+        epoch_start = time.time()
         net.normalize_entity_parameters()
+        checkpoint = time.time()
+        print('normalization completed, time used: {}'.format(str(checkpoint-epoch_start)))
         # logger.info('*'*40)
-        with autograd.record():
-            output = net(0, 2)
-            # logger.debug(output)
-            l = loss(output, nd.zeros(output.shape, ctx=ctx))
-            # logger.debug(l)
-            logger.info('epoch {}: {}'.format(str(i), str(l.sum().asscalar())))
-            print('epoch {}: \n\t total loss: {},\n\t avg loss: {}'.format(str(i), 
-                    str(l.sum().asscalar()),
-                    str(l.mean().asscalar())))
-            l = l.mean()
-            p.append(l.asscalar())
-        l.backward()
-        trainer.step(1)
+        for current_batch_num in range(total_batch_num):
+            print('current batch: {}'.format(str(current_batch_num)))
+            with autograd.record():
+                output = net(current_batch_num*batch_size, 
+                            current_batch_num*batch_size+batch_size)
+                # logger.debug(output)
+                l = loss(output, nd.zeros(output.shape, ctx=ctx))
+                batch_total_loss = l.sum().asscalar()
+                # logger.debug(l)
+                l = l.mean()
+                p.append(l.asscalar())
+            l.backward()
+            trainer.step(1)
+            print('epoch {} batch {} completed, time used: {}, epoch time remaining: {}'.format(
+                    str(epoch),
+                    str(current_batch_num),
+                    str(time.time()-checkpoint),
+                    str((time.time()-epoch_start)/(current_batch_num+1)*total_batch_num)))
+            checkpoint = time.time()
+            batch_info = 'epoch {} batch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
+                    str(epoch),
+                    str(current_batch_num), 
+                    str(time.time() - checkpoint),
+                    str(batch_total_loss),
+                    str(batch_total_loss/batch_size))
+            logger.info(batch_info)
+            # print(batch_info)
+            epoch_loss += batch_total_loss
+        epoch_info = 'epoch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
+                str(epoch), 
+                str(time.time() - checkpoint),
+                str(epoch_loss),
+                str(epoch_loss / train_triple_size))
+        logger.info(epoch_info)
+        print(epoch_info)
     net.dump('relations.txt', loss)
     draw(p)
 
