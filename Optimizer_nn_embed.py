@@ -66,27 +66,24 @@ class FancyMLP(nn.Block):
         # print(self.distance(h,r,t) - self.distance(h_hat,r,t_hat))
         return L
 
-    def negative_sampling(self, train_triple_set:[int], negative_sampling_rate=0.5):
+    def negative_sampling(self, train_triple_set:[int], negative_sampling_rate=0.5, max_round=20):
         import random
         negative_sample = []
         for (head, relat, tail) in train_triple_set:
-            sample_source = []
-            for head_idx in list(range(self.entity_size)):
+            for i in range(max_round):
+                head_idx = random.randint(0, self.entity_size-1)
                 if head_idx == tail:
                     continue
                 if (head_idx, relat, tail) not in train_triple_set:
-                    sample_source.append((head_idx, tail))
-            choice = random.choice(sample_source)
-            negative_sample.append((head, relat, tail, *choice))
+                    negative_sample.append((head, relat, tail, head_idx, tail))
+                    break
 
-            sample_source = []
-            for tail_idx in list(range(self.entity_size)):
+            for i in range(max_round):
+                tail_idx = random.randint(0, self.entity_size-1)
                 if head == tail_idx:
                     continue
                 if (head, relat, tail_idx) not in train_triple_set:
-                    sample_source.append((head, tail_idx))
-            choice = random.choice(sample_source)
-            negative_sample.append((head, relat, tail, *choice))
+                    negative_sample.append((head, relat, tail, head, tail_idx))
             # TODO
         # self.logger.debug(negative_sample)
         return negative_sample
@@ -109,16 +106,19 @@ class FancyMLP(nn.Block):
 
     def forward(self, start=0, end=10):
         # (h_i, r_i, t_i) = self.train_triple_set[start]
+        t1 = time.time()
         new_train_triple_set = []
         while new_train_triple_set == []:
             new_train_triple_set = self.negative_sampling(
                     self.train_triple_set[start:end], self.negative_sampling_rate)
         logger.debug(new_train_triple_set)
+        t2 = time.time()
         h_i = nd.array([triple[0] for triple in new_train_triple_set], ctx=self.ctx)
         r_i = nd.array([triple[1] for triple in new_train_triple_set], ctx=self.ctx)
         t_i = nd.array([triple[2] for triple in new_train_triple_set], ctx=self.ctx)
         h_hat_i = nd.array([triple[3] for triple in new_train_triple_set], ctx=self.ctx)
         t_hat_i = nd.array([triple[4] for triple in new_train_triple_set], ctx=self.ctx)
+        t3 = time.time()
         # logger.debug(h_i)
         # logger.debug(t_i)
         # logger.debug(h_hat_i)
@@ -129,12 +129,20 @@ class FancyMLP(nn.Block):
         r = self.relation_embedding(r_i)
         h_hat = self.entity_embedding(h_hat_i)
         t_hat = self.entity_embedding(t_hat_i)
+        t4 = time.time()
         # logger.debug(h)
         # logger.debug(t)
         # logger.debug(h_hat)
         # logger.debug(t_hat)
         
         L = self.loss_function(h, r, t, h_hat, t_hat)
+        t5 = time.time()
+        logger.debug('formard time: {} {} {} {}'.format(
+            str(t2 - t1),
+            str(t3 - t2),
+            str(t4 - t3),
+            str(t5 - t4)
+        ))
         # self.logger.debug(L)
         return L
 
@@ -194,7 +202,7 @@ def build_simple_dataset(entity_dim=2, relation_dim=2, ctx=None):
 
 
 if __name__ == '__main__':
-    logger = Log(20, 'pg', False)
+    logger = Log(10, 'pg', False)
 
     ctx = gpu(0)
     mode = 'complex'
@@ -222,7 +230,7 @@ if __name__ == '__main__':
         train_triple_size = loader.train_triple_size
         entity_dim = 50
         relation_dim = 50
-        batch_size = 100
+        batch_size = 500
         total_batch_num = train_triple_size // batch_size + 1
         train_data = loader.train_triple
         print('Loading completed')
@@ -260,21 +268,30 @@ if __name__ == '__main__':
         for current_batch_num in range(total_batch_num):
             print('current batch: {}'.format(str(current_batch_num)))
             with autograd.record():
+                t1 = time.time()
                 output = net(current_batch_num*batch_size, 
                             current_batch_num*batch_size+batch_size)
                 # logger.debug(output)
+                t2 = time.time()
                 l = loss(output, nd.zeros(output.shape, ctx=ctx))
+                t3 = time.time()
                 batch_total_loss = l.sum().asscalar()
                 # logger.debug(l)
-                l = l.mean()
-                p.append(l.asscalar())
-            l.backward()
-            trainer.step(1)
-            print('epoch {} batch {} completed, time used: {}, epoch time remaining: {}'.format(
+                # l = l.mean()
+            # print(t2-t1)
+            # print(t3-t2)
+            print('epoch {} batch {}/{} completed, time used: {}, epoch time remaining: {}'.format(
                     str(epoch),
                     str(current_batch_num),
+                    str(total_batch_num),
                     str(time.time()-checkpoint),
                     str((time.time()-epoch_start)/(current_batch_num+1)*total_batch_num)))
+            checkpoint = time.time()
+            l.backward()
+            print('backward time: {}'.format(str(time.time()-checkpoint)))
+            checkpoint = time.time()
+            trainer.step(batch_size)
+            print('step time: {}'.format(str(time.time()-checkpoint)))
             checkpoint = time.time()
             batch_info = 'epoch {} batch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
                     str(epoch),
@@ -285,6 +302,8 @@ if __name__ == '__main__':
             logger.info(batch_info)
             # print(batch_info)
             epoch_loss += batch_total_loss
+        p.append(epoch_loss/total_batch_num) 
+        #TODO
         epoch_info = 'epoch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
                 str(epoch), 
                 str(time.time() - checkpoint),
@@ -295,7 +314,7 @@ if __name__ == '__main__':
     net.dump('relations.txt', loss)
     draw(p)
 
-    for i in range(5):
-        print(net.predict_with_h_r(i,0))
-    for i in range(5):
-        print(net.predict_with_h_r(i,1))
+    # for i in range(5):
+    #     print(net.predict_with_h_r(i,0))
+    # for i in range(5):
+    #     print(net.predict_with_h_r(i,1))
