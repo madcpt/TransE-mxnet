@@ -287,7 +287,7 @@ if __name__ == '__main__':
         train_triple_size = loader.train_triple_size
         entity_dim = 50
         relation_dim = 50
-        batch_size = 500
+        batch_size = 1000
         total_batch_num = math.ceil(train_triple_size/batch_size)
         train_data = loader.train_triple
         print('Loading completed')
@@ -313,7 +313,7 @@ if __name__ == '__main__':
         all_start = time.time()
         print('Start iteration:')
 
-        for epoch in range(100):
+        for epoch in range(10):
             epoch_loss = 0
             epoch_start = time.time()
             net.normalize_entity_parameters()
@@ -340,7 +340,7 @@ if __name__ == '__main__':
                         str(current_batch_num),
                         str(total_batch_num),
                         str(time.time()-epoch_start),
-                        str((time.time()-epoch_start)/(current_batch_num+1)*total_batch_num)))
+                        str((time.time()-epoch_start)/(current_batch_num+1)*(total_batch_num-current_batch_num-1))))
                 checkpoint = time.time()
                 l.backward()
                 # print('backward time: {}'.format(str(time.time()-checkpoint)))
@@ -379,7 +379,7 @@ if __name__ == '__main__':
         print(total)
         print(tail)
         # TODO
-    
+
     # for i in range(5):
     #     print(net.predict_with_h_r(i,0))
     # for i in range(5):
