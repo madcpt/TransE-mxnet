@@ -1,8 +1,8 @@
 playground/*
-log/*
+*.log
 *.pyc
 */*/*/__pycache__/
 */*/__pycache__/
 */__pycache__/
 __pycache__
-relatino.txt
+relation.txt
