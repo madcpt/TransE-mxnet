@@ -27,17 +27,17 @@ class DataLoader(object):
         with open(self.train_path, 'r') as f:
             lines = f.readlines()
         self.train_list = [line.split() for line in lines]
-        print(len(self.train_list))
+        print('Trainset size: {}'.format(len(self.train_list)))
 
         with open(self.valid_path, 'r') as f:
             lines = f.readlines()
         self.valid_list = [line.split() for line in lines]
-        print(len(self.valid_list))
+        print('Validset size: {}'.format(len(self.valid_list)))
         
         with open(self.test_path, 'r') as f:
             lines = f.readlines()
         self.test_list = [line.split() for line in lines]
-        print(len(self.test_list))
+        print('Testset size: {}'.format(len(self.test_list)))
     
     def counter_filter(self, raw_dataset, count=1):
         counter = collections.Counter([tk for tk in raw_dataset])
@@ -72,6 +72,9 @@ class DataLoader(object):
                 self.relation_map = eval(f.read())
         self.entity_size = len(self.entity_map.keys())
         self.relation_size = len(self.relation_map.keys())
+        
+        print('Entity_size: {}'.format(self.entity_size))
+        print('Relation_size: {}'.format(self.relation_size))
 
         self.train_triple = [(self.entity_map[i[0]], self.relation_map[i[1]], self.entity_map[i[2]]) 
                                 for i in self.train_list
