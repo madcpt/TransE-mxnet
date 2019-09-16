@@ -64,8 +64,10 @@ class DataLoader(object):
             with open(self.relation_map_path, 'w') as f:
                 f.write(str(self.relation_map))
         else:
+            print('Reading {}'.format(self.entity_map_path))
             with open(self.entity_map_path, 'r') as f:
                 self.entity_map = eval(f.read())
+            print('Reading {}'.format(self.relation_map_path))
             with open(self.relation_map_path, 'r') as f:
                 self.relation_map = eval(f.read())
         self.entity_size = len(self.entity_map.keys())

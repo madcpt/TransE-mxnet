@@ -37,6 +37,7 @@ class FancyMLP(nn.Block):
         self.logger = logger
         self.param_path = param_path
         self.sparse = sparse
+        self.training_log = []
 
     def load_relation_data(self, relation_data:list, mode='complex', type='train'):
         if mode == 'simple':
@@ -109,7 +110,6 @@ class FancyMLP(nn.Block):
                         sample_source.append((head, tail_idx))
                 choice = random.choice(sample_source)
                 negative_sample.append((head, relat, tail, *choice))            # TODO
-        # self.logger.debug(negative_sample)
         return negative_sample
 
     def norm_layer(self, x, dim):
@@ -242,12 +242,24 @@ class FancyMLP(nn.Block):
             # print('step-end')
         return prediction, prediction_d
     
-    def evaluate(self, k=3, ord=1):
+    def get_rank(self, target_value, prediction_d):
+        for i in range(len(prediction_d)):
+            if target_value <= prediction_d[i]:
+                return i
+        return -1
+
+
+    def evaluate(self, mode='test', k=3, ord=1):
         total = 0
         hit = 0
-        head_list = nd.array([i[0] for i in self.test_triple_set], ctx=self.ctx)
-        relation_list = nd.array([i[1] for i in self.test_triple_set], ctx=self.ctx)
-        tail_list = nd.array([i[2] for i in self.test_triple_set], ctx=self.ctx)
+        if mode == 'test':
+            head_list = nd.array([i[0] for i in self.test_triple_set], ctx=self.ctx)
+            relation_list = nd.array([i[1] for i in self.test_triple_set], ctx=self.ctx)
+            tail_list = nd.array([i[2] for i in self.test_triple_set], ctx=self.ctx)
+        if mode == 'valid':
+            head_list = nd.array([i[0] for i in self.valid_triple_set], ctx=self.ctx)
+            relation_list = nd.array([i[1] for i in self.valid_triple_set], ctx=self.ctx)
+            tail_list = nd.array([i[2] for i in self.valid_triple_set], ctx=self.ctx)
         prediction, prediction_d = self.predict_with_h_r(head_list, relation_list, k, ord)
         # print(head_list)
         # print(relation_list)
@@ -258,10 +270,19 @@ class FancyMLP(nn.Block):
         for i in range(len(tail_list)):
             total += 1
             is_hit = tail_list[i] in prediction[i]
-            self.logger.debug('predict: {} - {} - {}'.format(tail_list[i],  prediction[i], prediction_d[i]))
+            # self.logger.debug('predict: {} - {} - {}'.format(tail_list[i],  prediction[i], prediction_d[i]))
             if is_hit:
                 hit += 1
-            print('Evaluation: {}/{}: {}'.format(str(i), str(len(tail_list)), str(is_hit)))
+            else:
+                h = self.entity_embedding(head_list[i])
+                r = self.relation_embedding(relation_list[i])
+                t = self.entity_embedding(tail_list[i])
+                target_value = self.distance(h, r, t).asscalar()
+                # print('target: {} rank: {} prediction: {}'.format(
+                #         target_value,
+                #         self.get_rank(target_value, prediction_d[i]),
+                #         str(prediction_d[i])))
+            # print('Evaluation: {}/{}: {}'.format(str(i), str(len(tail_list)), str(is_hit)))
         # for (head, relation, tail) in self.test_triple_set:
         #     total += 1
         #     prediction = self.predict_with_h_r(head, relation, k)
@@ -299,27 +320,35 @@ if __name__ == '__main__':
         param_path = './param/'
         model_name = 'simple'
         mode = 'simple'
-        isTrain = False
+        isTrain = True
         isContinueTrain = False
         sparse = False
+        margin = 0.3
+        epoch_num = 3000
+        k = 1
     else:
         ctx = gpu(1)
         param_path = './param/'
         model_name = 'WN'
         mode = 'complex'
         isTrain = True
-        isContinueTrain = True
+        isContinueTrain = False
         sparse = True
+        margin=10
+        epoch_num = 30000
+        k = 20
 
     if mode ==  'simple':
         entity_size = 5
         relation_size = 2
-        entity_dim = 10
-        relation_dim = 10
+        entity_dim = 2
+        relation_dim = 2
         batch_size = 3
         train_data = build_simple_dataset(entity_dim=entity_dim, 
                                 relation_dim=relation_dim, ctx=ctx)
         train_triple_size = len(train_data)
+        valid_data = train_data
+        valid_triple_size = train_triple_size
         test_data = build_simple_dataset(entity_dim=entity_dim, 
                                 relation_dim=relation_dim, ctx=ctx)
         test_triple_size = len(test_data)
@@ -335,41 +364,42 @@ if __name__ == '__main__':
         entity_size = loader.entity_size
         relation_size = loader.relation_size
         train_triple_size = loader.train_triple_size
-        entity_dim = 20
-        relation_dim = 20
-        batch_size = 600
+        entity_dim = 50
+        relation_dim = 50
+        batch_size = 500
         total_batch_num = math.ceil(train_triple_size/batch_size)
         train_data = loader.train_triple
+        valid_data = loader.valid_triple
         test_data = loader.test_triple
         print('Loading completed')
     
     net = FancyMLP(entity_size, relation_size,
                         entity_dim, relation_dim,
                         # negative_sampling_rate=0.3, 
-                        margin=2,
+                        margin=margin,
                         ctx=ctx, logger=logger, sparse=sparse, param_path=param_path)
     loss = gloss.L1Loss()
 
     if isTrain:
         net.load_relation_data(train_data, mode=mode, type='train')
+        net.load_relation_data(valid_data, mode=mode, type='valid')
         if isContinueTrain:
             print('Loading embeddings')
             net.load_embeddings(model_name=model_name)
-            logger.warn(net.entity_embedding(nd.array([0], ctx=ctx)))
         else:
             print('Initializing embeddings...')
             net.initialize(force_reinit=True, ctx=ctx)
             net.normalize_relation_parameters()
         print('Setting up trainer...')
         trainer = gluon.Trainer(net.collect_params(), 'sgd',
-                                {'learning_rate': 0.01})
+                                {'learning_rate': 0.1})
 
 
         p = []
         all_start = time.time()
         print('Start iteration:')
 
-        for epoch in range(1000):
+        for epoch in range(epoch_num):
             epoch_loss = 0
             epoch_start = time.time()
             net.normalize_entity_parameters()
@@ -382,7 +412,7 @@ if __name__ == '__main__':
                     t1 = time.time()
                     output = net(current_batch_num*batch_size, 
                                 current_batch_num*batch_size+batch_size)
-                    # logger.debug(output)
+                    # print(output)
                     t2 = time.time()
                     l = loss(output, nd.zeros(output.shape, ctx=ctx))
                     t3 = time.time()
@@ -415,7 +445,7 @@ if __name__ == '__main__':
                 # logger.info(batch_info)
                 # print(batch_info)
                 epoch_loss += batch_total_loss
-            p.append(epoch_loss/total_batch_num) 
+            p.append(epoch_loss/len(train_data)) 
             #TODO
             epoch_info = 'epoch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
                     str(epoch), 
@@ -423,13 +453,20 @@ if __name__ == '__main__':
                     str(epoch_loss),
                     str(epoch_loss / train_triple_size))
             logger.info(epoch_info)
-            print(epoch_info)
-            if epoch % 100 == 0:
+            if (epoch+1) % 100 == 0:
                 print('Auto-save parameters.')
+                print(epoch_info)
                 net.save_embeddings(model_name=model_name)
+                checkpoint = time.time()
+                (total, hit) = net.evaluate(mode='valid', k=k)
+                net.logger.debug('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
+                print('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
+                if hit*1.0/total > 0.5:
+                    break
+
+
             # net.save_parameters('{}model.params'.format(param_path))
         net.save_embeddings(model_name=model_name)
-        logger.warn(net.entity_embedding(nd.array([0], ctx=ctx)))
         # net.dump('relations.txt', loss)
         draw(p)
     else:
