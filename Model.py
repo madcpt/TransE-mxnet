@@ -225,13 +225,16 @@ class TransE(nn.Block):
                         self.param_path, model_name))
         self.relation_embedding.save_parameters('{}{}_relation.params'.format(
                         self.param_path, model_name))
+        with open('{}{}_log.stat'.format(self.param_path, model_name), 'w') as f:
+            f.write(str(self.training_log))
                 
     def load_embeddings(self, model_name):
         self.entity_embedding.load_parameters('{}{}_entity.params'.format(
                         self.param_path, model_name), ctx=self.ctx)
         self.relation_embedding.load_parameters('{}{}_relation.params'.format(
                         self.param_path, model_name), ctx=self.ctx)
-                
+        with open('{}{}_log.stat'.format(self.param_path, model_name), 'r') as f:
+            self.training_log = eval(f.read())    
     
     def dump(self, path, loss):
         with open(path, 'w') as f:
@@ -290,6 +293,15 @@ class TransE(nn.Block):
                 return i
         return -1
 
+    def get_old_log(self):
+        return self.training_log
+    
+    def get_loss_trend(self):
+        return [i[1] for i in self.training_log]
+    
+    def add_training_log(self, epoch_num:int, total_loss:float, epoch_time:float):
+        if len(self.training_log) == epoch_num:
+            self.training_log.append((epoch_num, total_loss, epoch_time))
 
     def evaluate(self, mode='test', k=3, ord=1):
         total = 0

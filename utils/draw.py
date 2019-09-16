@@ -1,8 +1,9 @@
-def draw(p1): 
+def draw(p1, display=False): 
     import matplotlib.pyplot as plt
     plt.figure('Draw')
-    plt.plot(p1)  
+    plt.plot(p1)
     plt.savefig("easyplot01.png")
-    plt.draw()  
-    plt.pause(1)  
+    if display:
+        plt.draw()  
+        plt.pause(5)  
     plt.close()

@@ -13,7 +13,7 @@ if __name__ == '__main__':
         mode = 'simple'
         isTrain = True
         sample_raw_negative = False
-        isContinueTrain = False
+        useExistedModel = False
         sparse = False
         margin = 0.3 
         epoch_num = 3000
@@ -25,11 +25,11 @@ if __name__ == '__main__':
         mode = 'complex'
         isTrain = True
         sample_raw_negative = True
-        isContinueTrain = False
+        useExistedModel = False
         autoEvaluate = False
         sparse = True
         margin=10
-        epoch_num = 1
+        epoch_num = 10
         k = 20
 
     if mode ==  'simple':
@@ -60,7 +60,7 @@ if __name__ == '__main__':
         train_triple_size = loader.train_triple_size
         entity_dim = 50
         relation_dim = 50
-        batch_size = 150000
+        batch_size = 1000
         total_batch_num = math.ceil(train_triple_size/batch_size)
         train_data = loader.train_triple
         valid_data = loader.valid_triple
@@ -78,7 +78,7 @@ if __name__ == '__main__':
     if isTrain:
         net.load_relation_data(train_data, mode=mode, type='train')
         net.load_relation_data(valid_data, mode=mode, type='valid')
-        if isContinueTrain:
+        if useExistedModel:
             print('Loading embeddings')
             net.load_embeddings(model_name=model_name)
         else:
@@ -90,10 +90,10 @@ if __name__ == '__main__':
                                 {'learning_rate': 0.1})
 
 
-        p = []
         all_start = time.time()
         print('Start iteration:')
 
+        old_model_epoch = len(net.get_old_log())
         for epoch in range(epoch_num):
             epoch_loss = 0
             epoch_start = time.time()
@@ -103,19 +103,21 @@ if __name__ == '__main__':
             # logger.info('*'*40)
             for current_batch_num in range(total_batch_num):
                 # print('current batch: {}'.format(str(current_batch_num)))
+                t1 = time.time()
                 with autograd.record():
-                    t1 = time.time()
                     output = net(current_batch_num*batch_size, 
                                 current_batch_num*batch_size+batch_size)
-                    print(output)
+                    # print(output)
                     t2 = time.time()
                     l = loss(output, nd.zeros(output.shape, ctx=ctx))
-                    t3 = time.time()
-                batch_total_loss = l.sum().asscalar()
+                t3 = time.time()
+                l.backward()
+                t4 = time.time()
                     # logger.debug(l)
                     # l = l.mean()
                 logger.info('Forward time: {}'.format(str(t2-t1)))
                 logger.info('Calc loss time: {}'.format(str(t3-t2)))
+                logger.info('Backward time: {}'.format(str(t4-t3)))
 
                 # print('epoch {} batch {}/{} completed, time used: {}, epoch time remaining: {}'.format(
                 #         str(epoch),
@@ -125,30 +127,31 @@ if __name__ == '__main__':
                 #         str((time.time()-epoch_start)/(current_batch_num+1)*(total_batch_num-current_batch_num-1))))
                 
                 checkpoint = time.time()
-                l.backward()
-                logger.info('Backward time: {}'.format(str(time.time()-checkpoint)))
+                batch_total_loss = l.mean().asscalar()
+                logger.info('Calc batch_loss time: {}'.format(str(time.time()-checkpoint)))
                 checkpoint = time.time()
                 trainer.step(batch_size)
-                # print('step time: {}'.format(str(time.time()-checkpoint)))
+                logger.info('step time: {}'.format(str(time.time()-checkpoint)))
                 checkpoint = time.time()
-                batch_info = 'epoch {} batch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
+                batch_info = 'epoch {} batch {} time: {} total loss: {}, avg loss: {}'.format(
                         str(epoch),
                         str(current_batch_num), 
                         str(time.time() - t1),
                         str(batch_total_loss),
                         str(batch_total_loss/batch_size))
                 # logger.info(batch_info)
-                # print(batch_info)
                 epoch_loss += batch_total_loss
-            p.append(epoch_loss/len(train_data)) 
             #TODO
+            epoch_time = time.time() - epoch_start
             epoch_info = 'epoch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
                     str(epoch), 
-                    str(time.time() - epoch_start),
+                    str(epoch_time),
                     str(epoch_loss),
                     str(epoch_loss / train_triple_size))
             logger.info(epoch_info)
+            net.add_training_log(epoch+old_model_epoch, epoch_loss, epoch_time)
             if (epoch+1) % 100 == 0:
+                draw(net.get_loss_trend(), False)
                 print('Auto-save parameters.')
                 print(epoch_info)
                 net.save_embeddings(model_name=model_name)
@@ -162,11 +165,10 @@ if __name__ == '__main__':
                 else:
                     print('Skip Evaluation.')
 
-
             # net.save_parameters('{}model.params'.format(param_path))
         net.save_embeddings(model_name=model_name)
         # net.dump('relations.txt', loss)
-        draw(p)
+        draw(net.get_loss_trend())
     else:
         net.load_embeddings(model_name=model_name)
         net.load_relation_data(test_data, mode=mode, type='test')
