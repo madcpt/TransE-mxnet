@@ -48,6 +48,8 @@ class TransE(nn.Block):
                 triple = (relat.head.idx, relat.idx, relat.tail.idx)
                 if type=='train':
                     self.train_triple_set.append(triple)
+                    self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
+                    self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
                 if type=='valid':
                     self.valid_triple_set.append(triple)
                 if type=='test':
@@ -55,12 +57,12 @@ class TransE(nn.Block):
         if mode == 'complex':
             if type=='train':
                 self.train_triple_set.extend(relation_data)
+                self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
+                self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
             if type=='valid':
                 self.valid_triple_set.extend(relation_data)
             if type=='test':
                 self.test_triple_set.extend(relation_data)
-        self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
-        self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
 
     def distance(self, h, r, t, ord=1):
         # self.take_log(h, r, t)
@@ -207,12 +209,12 @@ class TransE(nn.Block):
         
         L = self.loss_function(h, r, t, h_hat, t_hat)
         t5 = time.time()
-        self.logger.warning('forward time details: {} {} {} {}'.format(
-            str(t2 - t1),
-            str(t3 - t2),
-            str(t4 - t3),
-            str(t5 - t4)
-        ))
+        # self.logger.warning('forward time details: {} {} {} {}'.format(
+        #     str(t2 - t1),
+        #     str(t3 - t2),
+        #     str(t4 - t3),
+        #     str(t5 - t4)
+        # ))
         # self.logger.debug(L)
         return L
 
