@@ -2,10 +2,10 @@ import collections
 
 
 class DataLoader(object):
-    def __init__(self, *args):
-        self.train_path = './data/WN18/train.txt'
-        self.valid_path = './data/WN18/valid.txt'
-        self.test_path = './data/WN18/test.txt'
+    def __init__(self, dataset='WN18', *args):
+        self.train_path = './data/{}/train.txt'.format(dataset)
+        self.valid_path = './data/{}/valid.txt'.format(dataset)
+        self.test_path = './data/{}/test.txt'.format(dataset)
         self.entity_map_path = './data/WN18/entity_map.db'
         self.relation_map_path = './data/WN18/relation_map.db'
         self.train_list = []

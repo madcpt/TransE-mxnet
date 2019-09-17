@@ -17,20 +17,26 @@ if __name__ == '__main__':
         sparse = False
         margin = 0.3 
         epoch_num = 1
-        k = 1
+        k = [1,2,3]
     else:
-        ctx = gpu(0)
+        ctx = gpu(1)
         param_path = './param/'
+        dataset = 'WN18'
         model_name = 'WN'
         mode = 'complex'
         isTrain = True
         sample_raw_negative = True
-        useExistedModel = False
-        autoEvaluate = False
+        useExistedModel = True
+        autoEvaluate = True
         sparse = True
-        margin=6
-        epoch_num = 1
-        k = 20
+        margin=10
+        epoch_num = 30000
+        entity_dim = 50
+        relation_dim = 50
+        batch_size = 500
+        optimizer = 'Adagrad'
+        lr = {'learning_rate': 1e-3}
+        k = [10, 20, 50, 100]
 
     if mode ==  'simple':
         entity_size = 5
@@ -48,7 +54,7 @@ if __name__ == '__main__':
         test_triple_size = len(test_data)
         total_batch_num = math.ceil(train_triple_size/batch_size)
     elif mode == 'complex':
-        loader = DataLoader()
+        loader = DataLoader(dataset)
         print('Start loading data from {}'.format(loader.train_path))
         print('Start loading data from {}'.format(loader.valid_path))
         print('Start loading data from {}'.format(loader.test_path))
@@ -58,9 +64,6 @@ if __name__ == '__main__':
         entity_size = loader.entity_size
         relation_size = loader.relation_size
         train_triple_size = loader.train_triple_size
-        entity_dim = 50
-        relation_dim = 50
-        batch_size = 100
         total_batch_num = math.ceil(train_triple_size/batch_size)
         train_data = loader.train_triple
         valid_data = loader.valid_triple
@@ -88,8 +91,7 @@ if __name__ == '__main__':
             if autograd.is_recording():
                 print('Relation normalization exposed.')
         print('Setting up trainer...')
-        trainer = gluon.Trainer(net.collect_params(), 'sgd',
-                                {'learning_rate': 1e-1})
+        trainer = gluon.Trainer(net.collect_params(), optimizer, lr)
 
 
         all_start = time.time()
@@ -154,18 +156,20 @@ if __name__ == '__main__':
                     str(epoch_loss / train_triple_size))
             logger.info(epoch_info)
             net.add_training_log(epoch+old_model_epoch, epoch_loss, epoch_time)
-            if epoch==0 or (epoch+1) % 50 == 0:
+            if epoch==0 or (epoch+1) % 10 == 0:
                 draw(net.get_loss_trend(), False)
                 print('Auto-save parameters.')
                 print(epoch_info)
                 net.save_embeddings(model_name=model_name)
                 checkpoint = time.time()
-                if autoEvaluate and (epoch+1) % 500 == 0:
+                if autoEvaluate and ((epoch+1) % 10 == 0 or epoch == 0):
                     (total, hit) = net.evaluate(mode='valid', k=k)
-                    logger.info('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
-                    print('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
-                    if hit*1.0/total > 0.5:
-                        break
+                    for i in range(len(k)):
+                        logger.info('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
+                        print('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
+                    # if hit*1.0/total > 0.5:
+                    #     break
+                    # TODO
                 else:
                     print('Skip Evaluation.')
 
@@ -178,14 +182,12 @@ if __name__ == '__main__':
         # net.initialize(force_reinit=True, ctx=ctx)
         net.load_relation_data(test_data, mode=mode, type='test')
         net.load_embeddings(model_name=model_name)
-        (total, hit) = net.evaluate(k=1000)
-        print(total)
-        print(hit)
-        print(hit/total)
-        (total, hit) = net.evaluate(k=100)
-        print(total)
-        print(hit)
-        print(hit/total)
+        print('Start evaluating')
+        checkpoint = time.time()
+        (total, hit) = net.evaluate(k=k)
+        for i in range(len(k)):
+            logger.info('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
+            print('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
         # TODO
 
     # for i in range(5):
