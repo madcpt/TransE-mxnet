@@ -15,7 +15,9 @@ from utils.Log import Log
 
 
 class TransE(nn.Block):
-    def __init__(self, entity_size=0, relation_size=0, entity_dim=2, relation_dim=2, negative_sampling_rate=0.5, sample_raw_negative=True, margin=0.1, ctx=None, logger=None, param_path='./param/', sparse=True, **kwargs):
+    def __init__(self, entity_size=0, relation_size=0, entity_dim=2, relation_dim=2, 
+                negative_sampling_rate=0.5, sample_raw_negative=True, margin=0.1, 
+                ctx=None, logger=None, param_path='./param/', sparse=True, **kwargs):
         super(TransE, self).__init__(**kwargs)
         # self.entity_list = list(range(entity_size))
         # self.relation_list = list(range(relation_size))
@@ -32,7 +34,7 @@ class TransE(nn.Block):
         self.entity_embedding = Embedding(entity_size, entity_dim, 
                     weight_initializer=initializer.Uniform(6.0/math.sqrt(entity_dim)))
         self.relation_embedding = Embedding(relation_size, relation_dim, 
-                    weight_initializer=initializer.Uniform(6.0/math.sqrt(entity_dim)))
+                    weight_initializer=initializer.Uniform(6.0/math.sqrt(relation_dim)))
         self.negative_sampling_rate=negative_sampling_rate
         self.sample_raw_negative=sample_raw_negative
         self.margin = margin
@@ -48,6 +50,8 @@ class TransE(nn.Block):
                 triple = (relat.head.idx, relat.idx, relat.tail.idx)
                 if type=='train':
                     self.train_triple_set.append(triple)
+                    self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
+                    self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
                 if type=='valid':
                     self.valid_triple_set.append(triple)
                 if type=='test':
@@ -55,12 +59,12 @@ class TransE(nn.Block):
         if mode == 'complex':
             if type=='train':
                 self.train_triple_set.extend(relation_data)
+                self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
+                self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
             if type=='valid':
                 self.valid_triple_set.extend(relation_data)
             if type=='test':
                 self.test_triple_set.extend(relation_data)
-        self.train_triple_set_nd = nd.array(self.train_triple_set, ctx=self.ctx, dtype='int32')
-        self.train_triple_head_set_nd = self.train_triple_set_nd[:,0].reshape(len(self.train_triple_set_nd), 1)
 
     def distance(self, h, r, t, ord=1):
         # self.take_log(h, r, t)
@@ -68,13 +72,16 @@ class TransE(nn.Block):
         return D
 
     def loss_function(self, h, r, t, h_hat, t_hat):
-        L = nd.maximum(nd.array(self.margin + self.distance(h,r,t) -
-                         self.distance(h_hat,r,t_hat), self.ctx), 0)
+        d1 = self.distance(h,r,t)
+        d2 = self.distance(h_hat,r,t_hat)
+        L = nd.maximum(nd.array(self.margin + d1 - d2, self.ctx), 0)
+        # L = self.distance(h,r,t)
         # print(self.distance(h,r,t) - self.distance(h_hat,r,t_hat))
         return L
 
-    def negative_sampling_old(self, triple_set:[tuple], negative_sampling_rate=0.5, max_round=20, sparse=True):
+    def negative_sampling(self, start, end, negative_sampling_rate=0.5, max_round=20, sparse=True):
         '''Decrepted'''
+        triple_set = self.train_triple_set[start:end]
         start = time.time()
         import random
         negative_sample = []
@@ -96,8 +103,7 @@ class TransE(nn.Block):
                     t2 = time.time()
                     if head == tail_idx:
                         continue
-                    if self.sample_raw_negative or (head, relat, tail_idx) not in triple_set:
-                        # self.logger.info('random choice: {}'.format(str(i)))
+                    if (self.sample_raw_negative) or (head, relat, tail_idx) not in triple_set:
                         negative_sample.append((head, relat, tail, head, tail_idx))
                         break
                     t3 = time.time()
@@ -128,7 +134,7 @@ class TransE(nn.Block):
         self.logger.info('Negative sampling inside time: {}'.format(str(time.time()-start)))
         return negative_sample
     
-    def negative_sampling(self, start, end, negative_sampling_rate=0.5, max_round=20, sparse=True):
+    def negative_sampling_new(self, start, end, negative_sampling_rate=0.5, max_round=20, sparse=True):
         # TODO raw, sparse
         t1 = time.time()
         negative_sample = []
@@ -153,17 +159,21 @@ class TransE(nn.Block):
         # return (x/x.norm(axis=-1, keepdims=True))
         return x
 
-    def normalize_relation_parameters(self):
+    def normalize_relation_parameters(self, ord=2):
         for tag in list(self.relation_embedding.params):
             # logger.debug(self.relation_embedding.params[tag].data())
-            weight = self.relation_embedding.params[tag]
-            self.relation_embedding.params[tag].set_data(weight.data()/weight.data().norm(axis=-1, keepdims=True))
+            weight = self.relation_embedding.params[tag].data().detach()
+            self.relation_embedding.params[tag].set_data(weight/weight.norm(ord=ord, axis=-1, keepdims=True))
+            self.relation_embedding.params[tag].zero_grad()
+            # print(self.relation_embedding.params[tag].grad())
     
-    def normalize_entity_parameters(self):
+    def normalize_entity_parameters(self, ord=2):
         for tag in list(self.entity_embedding.params):
             # logger.debug(self.entity_embedding.params[tag].data())
-            weight = self.entity_embedding.params[tag]
-            self.entity_embedding.params[tag].set_data(weight.data()/weight.data().norm(axis=-1, keepdims=True))
+            weight = self.entity_embedding.params[tag].data().detach()
+            self.entity_embedding.params[tag].set_data(weight/weight.norm(ord=ord, axis=-1, keepdims=True))
+            self.entity_embedding.params[tag].zero_grad()
+            # print(self.entity_embedding.params[tag].grad())
 
     def forward(self, start=0, end=10):
         # (h_i, r_i, t_i) = self.train_triple_set[start]
@@ -207,12 +217,12 @@ class TransE(nn.Block):
         
         L = self.loss_function(h, r, t, h_hat, t_hat)
         t5 = time.time()
-        self.logger.warning('forward time details: {} {} {} {}'.format(
-            str(t2 - t1),
-            str(t3 - t2),
-            str(t4 - t3),
-            str(t5 - t4)
-        ))
+        # self.logger.warning('forward time details: {} {} {} {}'.format(
+        #     str(t2 - t1),
+        #     str(t3 - t2),
+        #     str(t4 - t3),
+        #     str(t5 - t4)
+        # ))
         # self.logger.debug(L)
         return L
 
@@ -253,7 +263,20 @@ class TransE(nn.Block):
                     str(h_i), str(r_i), str(t_i), str(h), str(r), str(t), 
                     str(self.distance(h, r, t)), str(self.distance(h, r, t).abs().sum())))
     
-    def predict_with_h_r(self, head_list, relation_list, k=3, ord=1):
+    def get_triple_embdeding(self, start, end, mode='train'):
+        if mode == 'train':
+            current_train_triple = self.train_triple_set_nd[start: end]
+            heads_idx = current_train_triple[:,0]
+            heads_embedding = self.entity_embedding(heads_idx.reshape(len(heads_idx),1))
+            relations_idx = current_train_triple[:,1]
+            relations_embedding = self.relation_embedding(relations_idx.reshape(len(heads_idx),1))
+            tails_idx = current_train_triple[:,2]
+            tails_embedding = self.entity_embedding(tails_idx.reshape(len(heads_idx),1))
+            # triple_embedding = nd.concat(heads_embedding, relations_embedding, tails_embedding)
+            return (heads_embedding, relations_embedding, tails_embedding)
+    
+    def predict_with_h_r_old(self, head_list, relation_list, k=3, ord=1):
+        '''Deprecated'''
         heads = self.entity_embedding(head_list)
         relations = self.relation_embedding(relation_list)
         tails = self.entity_embedding(nd.array(list(range(self.entity_size)), ctx=self.ctx))
@@ -274,7 +297,7 @@ class TransE(nn.Block):
             ceil = candidates.max()+1
             # print(ceil)
             # print('step3')
-            for j in range(k):
+            for j in range(len(k)):
                 min_idx = candidates.argmin()
                 # print(candidates[min_idx])
                 if candidates[min_idx] != ceil:
@@ -286,6 +309,55 @@ class TransE(nn.Block):
             # print(prediction_i)
             # print('step-end')
         return prediction, prediction_d
+        
+    def predict_with_h_r(self, head_list, relation_list, tail_list, k=[3], ord=1):
+        heads = self.entity_embedding(head_list)
+        relations = self.relation_embedding(relation_list)
+        targets = self.entity_embedding(tail_list)
+        tails = self.entity_embedding(nd.array(list(range(self.entity_size)), ctx=self.ctx))
+
+        distance = self.distance(heads, relations, targets)
+        
+        # print(heads)
+        # print(relations)
+        # print(tails)
+        # print(targets)
+        # print(distance)
+        # prediction = []
+        # prediction_d = []
+        # print('step1')
+        all_hit = [0]*len(k)
+        mean_rank = 0
+        for i in range(len(head_list)):
+            # print('Start {}'.format(str(i)))
+            # prediction_i = []
+            # prediction_d_i = []
+            candidates = self.distance(heads[i], relations[i], tails)
+            flag = candidates <= distance[i]
+            count = flag.sum().asscalar()
+            mean_rank += count
+            for j in range(len(k)):
+                if count<=k[j]:
+                    all_hit[j] += 1
+            # print('step2')
+            # candidates = candidates.asnumpy()
+            # # print(candidates)
+            # ceil = candidates.max()+1
+            # # print(ceil)
+            # # print('step3')
+            # for j in range(k):
+            #     min_idx = candidates.argmin()
+            #     # print(candidates[min_idx])
+            #     if candidates[min_idx] != ceil:
+            #         prediction_i.append(min_idx)
+            #         prediction_d_i.append(candidates[min_idx])
+            #         candidates[min_idx] = ceil
+            # prediction.append(prediction_i)
+            # prediction_d.append(prediction_d_i)
+            # print(prediction_i)
+            # print('step-end')
+        mean_rank /= len(head_list)
+        return (all_hit, mean_rank)
     
     def get_rank(self, target_value, prediction_d):
         for i in range(len(prediction_d)):
@@ -303,47 +375,55 @@ class TransE(nn.Block):
         if len(self.training_log) == epoch_num:
             self.training_log.append((epoch_num, total_loss, epoch_time))
 
-    def evaluate(self, mode='test', k=3, ord=1):
-        total = 0
-        hit = 0
+    def evaluate(self, mode='test', k=[3], ord=1):
         if mode == 'test':
             head_list = nd.array([i[0] for i in self.test_triple_set], ctx=self.ctx)
             relation_list = nd.array([i[1] for i in self.test_triple_set], ctx=self.ctx)
             tail_list = nd.array([i[2] for i in self.test_triple_set], ctx=self.ctx)
+            print("Test set loaded.")
         if mode == 'valid':
             head_list = nd.array([i[0] for i in self.valid_triple_set], ctx=self.ctx)
             relation_list = nd.array([i[1] for i in self.valid_triple_set], ctx=self.ctx)
             tail_list = nd.array([i[2] for i in self.valid_triple_set], ctx=self.ctx)
-        prediction, prediction_d = self.predict_with_h_r(head_list, relation_list, k, ord)
+        total = len(tail_list)
+        # hit = 0
+        t1 = time.time()
+        # prediction, prediction_d = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
+        (all_hit, mean_rank) = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
+        t2 = time.time()
+        print('Prediction completed, time used: {}'.format(str(t2-t1)))
         # print(head_list)
         # print(relation_list)
         # print(tail_list)
         # print(prediction)
         # print(prediction_d)
-        print('start evaluation')
-        for i in range(len(tail_list)):
-            total += 1
-            is_hit = tail_list[i] in prediction[i]
-            # self.logger.debug('predict: {} - {} - {}'.format(tail_list[i],  prediction[i], prediction_d[i]))
-            if is_hit:
-                hit += 1
-            else:
-                h = self.entity_embedding(head_list[i])
-                r = self.relation_embedding(relation_list[i])
-                t = self.entity_embedding(tail_list[i])
-                target_value = self.distance(h, r, t).asscalar()
-                # print('target: {} rank: {} prediction: {}'.format(
-                #         target_value,
-                #         self.get_rank(target_value, prediction_d[i]),
-                #         str(prediction_d[i])))
-            # print('Evaluation: {}/{}: {}'.format(str(i), str(len(tail_list)), str(is_hit)))
+        # for i in range(len(tail_list)):
+        #     total += 1
+        #     is_hit = tail_list[i] in prediction[i]
+        #     # self.logger.debug('predict: {} - {} - {}'.format(tail_list[i],  prediction[i], prediction_d[i]))
+        #     if is_hit:
+        #         hit += 1
+        #     else:
+        #         h = self.entity_embedding(head_list[i])
+        #         r = self.relation_embedding(relation_list[i])
+        #         t = self.entity_embedding(tail_list[i])
+        #         target_value = self.distance(h, r, t).asscalar()
+        #         # print('target: {} rank: {} prediction: {}'.format(
+        #         #         target_value,
+        #         #         self.get_rank(target_value, prediction_d[i]),
+        #         #         str(prediction_d[i])))
+        #     if i%100 == 0:
+        #         print('Evaluation: {}/{}: {}'.format(str(i), str(len(tail_list)), str(is_hit)))
+        t3 = time.time()
+        print('Evaluation time used: {}'.format(str(t3-t2)))
+        print('Mean_rank: {}'.format(mean_rank))
         # for (head, relation, tail) in self.test_triple_set:
         #     total += 1
         #     prediction = self.predict_with_h_r(head, relation, k)
         #     self.logger.debug('{} - {}'.format(tail, prediction))
         #     if tail in [i[0] for i in prediction]:
         #         hit += 1
-        return (total, hit)
+        return (total, all_hit)
 
 
 def build_simple_dataset(entity_dim=2, relation_dim=2, ctx=None):

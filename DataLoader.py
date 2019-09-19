@@ -2,12 +2,12 @@ import collections
 
 
 class DataLoader(object):
-    def __init__(self, *args):
-        self.train_path = './data/WN18/train.txt'
-        self.valid_path = './data/WN18/valid.txt'
-        self.test_path = './data/WN18/test.txt'
-        self.entity_map_path = './data/WN18/entity_map.db'
-        self.relation_map_path = './data/WN18/relation_map.db'
+    def __init__(self, dataset='WN18', *args):
+        self.train_path = './data/{}/train.txt'.format(dataset)
+        self.valid_path = './data/{}/valid.txt'.format(dataset)
+        self.test_path = './data/{}/test.txt'.format(dataset)
+        self.entity_map_path = './data/{}/entity_map.db'.format(dataset)
+        self.relation_map_path = './data/{}/relation_map.db'.format(dataset)
         self.train_list = []
         self.valid_list = []
         self.test_list = []
@@ -18,9 +18,9 @@ class DataLoader(object):
         self.train_triple = []
         self.valid_triple = []
         self.test_triple = []
-        self.train_triple_size = []
-        self.valid_triple_size = []
-        self.test_triple_size = []
+        self.train_triple_size = 0
+        self.valid_triple_size = 0
+        self.test_triple_size = 0
         
 
     def load_all(self):
@@ -45,15 +45,25 @@ class DataLoader(object):
         return counter
 
     def preprocess(self, filter_occurance=5, init=False):
+        '''Preprocess the dataset.
+
+        Parameters
+        ----------
+        filter_occurance : int
+            Only entities that occur no fewer than 'filter_occurance' will be included 
+            (occurring in either head or tail is qualified).
+        init : bool, default False
+            Whether to recreate entity2idx map and relation2idx map.
+           '''
         all_list = [*self.train_list,*self.valid_list,*self.test_list]
         entity_list = []
-        relation_set = []
+        relation_list = []
         for triple in all_list:
             entity_list.append(triple[0])
-            relation_set.append(triple[1])
+            relation_list.append(triple[1])
             entity_list.append(triple[2])
         entity_counter = self.counter_filter(entity_list, filter_occurance)
-        relation_counter = self.counter_filter(relation_set, 1)
+        relation_counter = self.counter_filter(relation_list, 1)
         if init:
             for (i, entity) in enumerate(entity_counter.keys()):
                 self.entity_map[entity] = i
@@ -96,6 +106,6 @@ class DataLoader(object):
         
 
 if __name__ == "__main__":
-    loader = DataLoader()
+    loader = DataLoader(dataset='WN18')
     loader.load_all()
-    loader.preprocess(1)
+    loader.preprocess(1, True)

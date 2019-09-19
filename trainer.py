@@ -2,7 +2,7 @@ from Model import *
 from utils.Log import Log
 
 if __name__ == '__main__':
-    logger = Log(10, 'pg', False)
+    logger = Log(20, 'pg', False)
 
     local = False
 
@@ -16,21 +16,45 @@ if __name__ == '__main__':
         useExistedModel = False
         sparse = False
         margin = 0.3 
-        epoch_num = 3000
-        k = 1
+        epoch_num = 1
+        k = [1,2,3]
     else:
-        ctx = gpu(0)
+        # ctx = gpu(1)
+        # param_path = './param/'
+        # dataset = 'SMALL'
+        # model_name = 'SMALL'
+        # mode = 'complex'
+        # isTrain = True
+        # sample_raw_negative = True
+        # useExistedModel = False
+        # autoEvaluate = False
+        # sparse = True
+        # margin=3
+        # epoch_num = 2000
+        # entity_dim = 2
+        # relation_dim = 2
+        # batch_size = 4
+        # optimizer = 'sgd'
+        # lr = {'learning_rate': 0.1}
+        # k = [1, 10, 20, 50, 100]
+        ctx = gpu(1)
         param_path = './param/'
-        model_name = 'WN'
+        dataset = 'WN18'
+        model_name = 'WN18'
         mode = 'complex'
         isTrain = True
         sample_raw_negative = True
-        useExistedModel = False
-        autoEvaluate = False
+        useExistedModel = True
+        autoEvaluate = True
         sparse = True
-        margin=10
-        epoch_num = 10
-        k = 20
+        margin=5
+        epoch_num = 2000 
+        entity_dim = 50
+        relation_dim = 50
+        batch_size = 500
+        optimizer = 'sgd'
+        lr = {'learning_rate': 0.1}
+        k = [10, 20, 50, 100, 1000, 40000]
 
     if mode ==  'simple':
         entity_size = 5
@@ -48,7 +72,7 @@ if __name__ == '__main__':
         test_triple_size = len(test_data)
         total_batch_num = math.ceil(train_triple_size/batch_size)
     elif mode == 'complex':
-        loader = DataLoader()
+        loader = DataLoader(dataset)
         print('Start loading data from {}'.format(loader.train_path))
         print('Start loading data from {}'.format(loader.valid_path))
         print('Start loading data from {}'.format(loader.test_path))
@@ -58,9 +82,6 @@ if __name__ == '__main__':
         entity_size = loader.entity_size
         relation_size = loader.relation_size
         train_triple_size = loader.train_triple_size
-        entity_dim = 50
-        relation_dim = 50
-        batch_size = 1000
         total_batch_num = math.ceil(train_triple_size/batch_size)
         train_data = loader.train_triple
         valid_data = loader.valid_triple
@@ -73,7 +94,7 @@ if __name__ == '__main__':
                         sample_raw_negative=sample_raw_negative,
                         margin=margin,
                         ctx=ctx, logger=logger, sparse=sparse, param_path=param_path)
-    loss = gloss.L1Loss()
+    # loss = gloss.L1Loss()
 
     if isTrain:
         net.load_relation_data(train_data, mode=mode, type='train')
@@ -84,10 +105,11 @@ if __name__ == '__main__':
         else:
             print('Initializing embeddings...')
             net.initialize(force_reinit=True, ctx=ctx)
-            net.normalize_relation_parameters()
+            net.normalize_relation_parameters(ord=2)
+            if autograd.is_recording():
+                print('Relation normalization exposed.')
         print('Setting up trainer...')
-        trainer = gluon.Trainer(net.collect_params(), 'sgd',
-                                {'learning_rate': 0.1})
+        trainer = gluon.Trainer(net.collect_params(), optimizer, lr)
 
 
         all_start = time.time()
@@ -95,11 +117,15 @@ if __name__ == '__main__':
 
         old_model_epoch = len(net.get_old_log())
         for epoch in range(epoch_num):
+            # logger.info(net.entity_embedding.params[list(net.entity_embedding.params)[0]].data())
+            # logger.info(net.relation_embedding.params[list(net.relation_embedding.params)[0]].data())
             epoch_loss = 0
             epoch_start = time.time()
-            net.normalize_entity_parameters()
+            net.normalize_entity_parameters(ord=2)
+            if autograd.is_recording():
+                print('Entity normalization exposed.')
             checkpoint = time.time()
-            logger.info('Entity normalization completed, time used: {}'.format(str(checkpoint-epoch_start)))
+            logger.debug('Entity normalization completed, time used: {}'.format(str(checkpoint-epoch_start)))
             # logger.info('*'*40)
             for current_batch_num in range(total_batch_num):
                 # print('current batch: {}'.format(str(current_batch_num)))
@@ -107,17 +133,20 @@ if __name__ == '__main__':
                 with autograd.record():
                     output = net(current_batch_num*batch_size, 
                                 current_batch_num*batch_size+batch_size)
+                    total_loss = output.sum()
+                    output = output.mean()
                     # print(output)
                     t2 = time.time()
-                    l = loss(output, nd.zeros(output.shape, ctx=ctx))
+                    # l = loss(output, nd.zeros(output.shape, ctx=ctx)).sum()
                 t3 = time.time()
-                l.backward()
+                # l.backward()
+                output.backward()
                 t4 = time.time()
                     # logger.debug(l)
                     # l = l.mean()
-                logger.info('Forward time: {}'.format(str(t2-t1)))
-                logger.info('Calc loss time: {}'.format(str(t3-t2)))
-                logger.info('Backward time: {}'.format(str(t4-t3)))
+                logger.debug('Forward time: {}'.format(str(t2-t1)))
+                logger.debug('Calc loss time: {}'.format(str(t3-t2)))
+                logger.debug('Backward time: {}'.format(str(t4-t3)))
 
                 # print('epoch {} batch {}/{} completed, time used: {}, epoch time remaining: {}'.format(
                 #         str(epoch),
@@ -127,15 +156,15 @@ if __name__ == '__main__':
                 #         str((time.time()-epoch_start)/(current_batch_num+1)*(total_batch_num-current_batch_num-1))))
                 
                 checkpoint = time.time()
-                batch_total_loss = l.mean().asscalar()
-                logger.info('Calc batch_loss time: {}'.format(str(time.time()-checkpoint)))
+                batch_total_loss = total_loss.asscalar()
+                logger.debug('Calc batch_loss time: {}'.format(str(time.time()-checkpoint)))
                 checkpoint = time.time()
-                trainer.step(batch_size)
-                logger.info('step time: {}'.format(str(time.time()-checkpoint)))
+                trainer.step(1)
+                logger.debug('step time: {}'.format(str(time.time()-checkpoint)))
                 checkpoint = time.time()
                 batch_info = 'epoch {} batch {} time: {} total loss: {}, avg loss: {}'.format(
                         str(epoch),
-                        str(current_batch_num), 
+                        str(epoch+old_model_epoch), 
                         str(time.time() - t1),
                         str(batch_total_loss),
                         str(batch_total_loss/batch_size))
@@ -144,24 +173,26 @@ if __name__ == '__main__':
             #TODO
             epoch_time = time.time() - epoch_start
             epoch_info = 'epoch {} time: {} \n\t total loss: {},\n\t avg loss: {}'.format(
-                    str(epoch), 
+                    str(epoch+old_model_epoch), 
                     str(epoch_time),
                     str(epoch_loss),
                     str(epoch_loss / train_triple_size))
             logger.info(epoch_info)
             net.add_training_log(epoch+old_model_epoch, epoch_loss, epoch_time)
-            if (epoch+1) % 100 == 0:
+            if epoch==0 or (epoch+1) % 50 == 0:
                 draw(net.get_loss_trend(), False)
                 print('Auto-save parameters.')
                 print(epoch_info)
                 net.save_embeddings(model_name=model_name)
                 checkpoint = time.time()
-                if autoEvaluate:
-                    (total, hit) = net.evaluate(mode='valid', k=k)
-                    net.logger.debug('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
-                    print('Evaluation time: {} accuracy: {}'.format(str(time.time()-checkpoint), str(hit*1.0/total)))
-                    if hit*1.0/total > 0.5:
-                        break
+                if autoEvaluate and ((epoch+1) % 100 == 0 or epoch == 0):
+                    (total, hit) = net.evaluate(mode='valid', k=k, ord=1)
+                    for i in range(len(k)):
+                        logger.info('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
+                        print('Evaluation time: {} Hit@ {}: {} {}/{}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total), str(int(hit[i])),  str(int(total))))
+                    # if hit*1.0/total > 0.5:
+                    #     break
+                    # TODO
                 else:
                     print('Skip Evaluation.')
 
@@ -170,17 +201,21 @@ if __name__ == '__main__':
         # net.dump('relations.txt', loss)
         draw(net.get_loss_trend())
     else:
-        net.load_embeddings(model_name=model_name)
-        net.load_relation_data(test_data, mode=mode, type='test')
         print('Initializing model...')
-        net.initialize(force_reinit=True, ctx=ctx)
-        (total, hit) = net.evaluate(k=100)
-        print(total)
-        print(hit)
-        print(hit/total)
+        # net.initialize(force_reinit=True, ctx=ctx)
+        net.load_relation_data(test_data, mode=mode, type='test')
+        net.load_embeddings(model_name=model_name)
+        print('Start evaluating')
+        checkpoint = time.time()
+        (total, hit) = net.evaluate(k=k)
+        for i in range(len(k)):
+            logger.info('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
+            print('Evaluation time: {} Hit@ {}: {}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total)))
         # TODO
 
     # for i in range(5):
     #     print(net.predict_with_h_r(i,0))
     # for i in range(5):
     #     print(net.predict_with_h_r(i,1))
+    # triple_embedding = net.get_triple_embdeding(0, loader.train_triple_size, 'train')
+    # print(nd.concat(*triple_embedding))
