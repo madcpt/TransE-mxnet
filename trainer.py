@@ -19,6 +19,7 @@ if __name__ == '__main__':
         epoch_num = 1
         k = [1,2,3]
     else:
+<<<<<<< HEAD
         # ctx = gpu(1)
         # param_path = './param/'
         # dataset = 'SMALL'
@@ -41,12 +42,19 @@ if __name__ == '__main__':
         param_path = './param/'
         dataset = 'WN18'
         model_name = 'WN18'
+=======
+        ctx = gpu(1)
+        param_path = './param/'
+        dataset = 'WN18'
+        model_name = 'WN'
+>>>>>>> e636dff8755eedb714f6e440ee8c41b42c97462c
         mode = 'complex'
         isTrain = True
         sample_raw_negative = True
         useExistedModel = True
         autoEvaluate = True
         sparse = True
+<<<<<<< HEAD
         margin=5
         epoch_num = 2000 
         entity_dim = 50
@@ -55,6 +63,16 @@ if __name__ == '__main__':
         optimizer = 'sgd'
         lr = {'learning_rate': 0.1}
         k = [10, 20, 50, 100, 1000, 40000]
+=======
+        margin=10
+        epoch_num = 30000
+        entity_dim = 50
+        relation_dim = 50
+        batch_size = 500
+        optimizer = 'Adagrad'
+        lr = {'learning_rate': 1e-3}
+        k = [10, 20, 50, 100]
+>>>>>>> e636dff8755eedb714f6e440ee8c41b42c97462c
 
     if mode ==  'simple':
         entity_size = 5
