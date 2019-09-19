@@ -389,11 +389,7 @@ class TransE(nn.Block):
         # hit = 0
         t1 = time.time()
         # prediction, prediction_d = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
-<<<<<<< HEAD
         (all_hit, mean_rank) = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
-=======
-        all_hit = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
->>>>>>> e636dff8755eedb714f6e440ee8c41b42c97462c
         t2 = time.time()
         print('Prediction completed, time used: {}'.format(str(t2-t1)))
         # print(head_list)
@@ -420,10 +416,7 @@ class TransE(nn.Block):
         #         print('Evaluation: {}/{}: {}'.format(str(i), str(len(tail_list)), str(is_hit)))
         t3 = time.time()
         print('Evaluation time used: {}'.format(str(t3-t2)))
-<<<<<<< HEAD
         print('Mean_rank: {}'.format(mean_rank))
-=======
->>>>>>> e636dff8755eedb714f6e440ee8c41b42c97462c
         # for (head, relation, tail) in self.test_triple_set:
         #     total += 1
         #     prediction = self.predict_with_h_r(head, relation, k)
