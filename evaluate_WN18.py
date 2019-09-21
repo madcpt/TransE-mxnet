@@ -10,9 +10,9 @@ if __name__ == '__main__':
     model_name = 'WN18'
     mode = 'complex'
     sparse = True
-    margin = 2
-    entity_dim = 20
-    relation_dim = 20
+    margin = 5
+    entity_dim = 50
+    relation_dim = 50
     k = [1, 10, 20, 50, 100, 1000, 40000]
 
     loader = DataLoader(dataset)

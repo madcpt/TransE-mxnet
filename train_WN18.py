@@ -9,17 +9,17 @@ if __name__ == '__main__':
     dataset = 'WN18'
     model_name = 'WN18'
     mode = 'complex'
-    sample_raw_negative = True
+    sample_raw_negative = False
     useExistedModel = False
     autoEvaluate = True
     sparse = True
     margin = 2
-    epoch_num = 1
+    epoch_num = 10000
     entity_dim = 20
     relation_dim = 20
-    batch_size = 15000
+    batch_size = 1500
     optimizer = 'sgd'
-    lr = {'learning_rate': 0.1}
+    lr = {'learning_rate': 1}
     k = [1, 10, 20, 50, 100, 1000, 40000]
 
     loader = DataLoader(dataset)
@@ -46,16 +46,19 @@ if __name__ == '__main__':
  
     net.load_relation_data(train_data, mode=mode, type='train')
     net.load_relation_data(valid_data, mode=mode, type='valid')
+    # net.setup_sampling_map()
+
     if useExistedModel:
         print('Loading embeddings')
         net.load_embeddings(model_name=model_name)
     else:
         print('Initializing embeddings...')
-        net.initialize(force_reinit=True, ctx=ctx)
+        net.initialize(ctx=ctx)
         net.normalize_relation_parameters(ord=2)
         if autograd.is_recording():
             print('Relation normalization exposed.')
     print('Setting up trainer...')
+    print(net.collect_params())
     trainer = gluon.Trainer(net.collect_params(), optimizer, lr)
 
 

@@ -18,6 +18,8 @@ class DataLoader(object):
         self.train_triple = []
         self.valid_triple = []
         self.test_triple = []
+        self.head_relation_to_tail = []
+        self.tail_relation_to_head = []
         self.train_triple_size = 0
         self.valid_triple_size = 0
         self.test_triple_size = 0

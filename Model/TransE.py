@@ -26,6 +26,8 @@ class TransE(nn.Block):
         self.test_triple_set = []
         self.train_triple_set_nd = np.array([])
         self.train_triple_head_set_nd = np.array([])
+        self.head_relation_to_tail = []
+        self.tail_relation_to_head = []
         self.entity_size = entity_size
         self.relation_size = relation_size
         self.entity_dim = entity_dim
@@ -65,6 +67,25 @@ class TransE(nn.Block):
             if type=='test':
                 self.test_triple_set.extend(relation_data)
 
+    def setup_sampling_map(self):
+        print('Setting up sampling map')
+        self.head_relation_to_tail = [{}]*self.entity_size
+        self.tail_relation_to_head = [{}]*self.entity_size
+        print('Adding sampling dataset')
+
+        for (head, relation, tail) in self.train_triple_set:
+            if relation in self.head_relation_to_tail[head].keys():
+                self.head_relation_to_tail[head][relation].append(tail)
+            else:
+                self.head_relation_to_tail[head][relation] = [tail]
+            if relation in self.tail_relation_to_head[tail].keys():
+                self.tail_relation_to_head[tail][relation].append(head)
+            else:
+                self.tail_relation_to_head[tail][relation] = [head]
+        print('Finished setting up sampling map')
+        # print(self.head_relation_to_tail[head][relation])
+        # print(self.tail_relation_to_head)
+
     def distance(self, h, r, t, ord=1):
         D = (h + r - t).norm(ord=ord, axis=-1)
         return D
@@ -95,17 +116,34 @@ class TransE(nn.Block):
                 #         break
 
                 for i in range(max_round):
-                    t1 = time.time()
-                    tail_idx = random.randint(0, self.entity_size-1)
-                    t2 = time.time()
-                    if head == tail_idx:
-                        continue
-                    if (self.sample_raw_negative) or (head, relat, tail_idx) not in triple_set:
-                        negative_sample.append((head, relat, tail, head, tail_idx))
-                        break
-                    t3 = time.time()
-                    fetch_time += t2 - t1
-                    valid_time += t3 - t2
+                    if random.random()<0.5:
+                        t1 = time.time()
+                        tail_idx = random.randint(0, self.entity_size-1)
+                        t2 = time.time()
+                        if head == tail_idx:
+                            continue
+                        if (self.sample_raw_negative) \
+                                or (head, relat, tail_idx) not in self.train_triple_set:
+                                # or (relat in self.head_relation_to_tail[head].keys() and tail_idx not in self.head_relation_to_tail[head][relat]):
+                            negative_sample.append((head, relat, tail, head, tail_idx))
+                            break
+                        t3 = time.time()
+                        fetch_time += t2 - t1
+                        valid_time += t3 - t2
+                    else:
+                        t1 = time.time()
+                        head_idx = random.randint(0, self.entity_size-1)
+                        t2 = time.time()
+                        if tail == head_idx:
+                            continue
+                        if (self.sample_raw_negative) \
+                                or (head_idx, relat, tail) not in self.train_triple_set:
+                                # or (relat in self.tail_relation_to_head[tail].keys() and head_idx not in self.tail_relation_to_head[tail][relat]):
+                            negative_sample.append((head, relat, tail, head_idx, tail))
+                            break
+                        t3 = time.time()
+                        fetch_time += t2 - t1
+                        valid_time += t3 - t2
             self.logger.error("Negative sampling time: {} {} {}".format(str(fetch_time),
                         str(valid_time),str(time.time()-start)))
         else:
