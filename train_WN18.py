@@ -13,11 +13,11 @@ if __name__ == '__main__':
     useExistedModel = False
     autoEvaluate = True
     sparse = True
-    margin = 2
+    margin = 5
     epoch_num = 10000
-    entity_dim = 20
-    relation_dim = 20
-    batch_size = 1500
+    entity_dim = 50
+    relation_dim = 50
+    batch_size = 500
     optimizer = 'sgd'
     lr = {'learning_rate': 1}
     k = [1, 10, 20, 50, 100, 1000, 40000]
@@ -29,6 +29,7 @@ if __name__ == '__main__':
     loader.load_all()
     print('Start preprocessing...')
     loader.preprocess(filter_occurance=1)
+    loader.setup_sampling_map()
     entity_size = loader.entity_size
     relation_size = loader.relation_size
     train_triple_size = loader.train_triple_size
@@ -36,13 +37,16 @@ if __name__ == '__main__':
     train_data = loader.train_triple
     valid_data = loader.valid_triple
     test_data = loader.test_triple
+    # head_relation_to_tail = loader.head_relation_to_tail
+    # tail_relation_to_head = loader.tail_relation_to_head
     print('Loading completed')
     
     net = TransE(entity_size, relation_size,
                         entity_dim, relation_dim,
                         sample_raw_negative=sample_raw_negative,
                         margin=margin,
-                        ctx=ctx, logger=logger, sparse=sparse, param_path=param_path)
+                        ctx=ctx, logger=logger, sparse=sparse,
+                        loader=loader, param_path=param_path)
  
     net.load_relation_data(train_data, mode=mode, type='train')
     net.load_relation_data(valid_data, mode=mode, type='valid')
@@ -60,6 +64,10 @@ if __name__ == '__main__':
     print('Setting up trainer...')
     print(net.collect_params())
     trainer = gluon.Trainer(net.collect_params(), optimizer, lr)
+    import sys
+    # print(sys.getsizeof(train_data))
+    # print(head_relation_to_tail[0][0])
+    # net.load_map(head_relation_to_tail, tail_relation_to_head)
 
 
     all_start = time.time()
@@ -81,9 +89,9 @@ if __name__ == '__main__':
             with autograd.record():
                 output = net(current_batch_num*batch_size, 
                             current_batch_num*batch_size+batch_size)
+                t2 = time.time()
                 total_loss = output.sum()
                 output = output.mean()
-                t2 = time.time()
             t3 = time.time()
             output.backward()
             t4 = time.time()

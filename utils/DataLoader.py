@@ -46,6 +46,42 @@ class DataLoader(object):
         counter = dict(filter(lambda x: x[1] >= count, counter.items()))
         return counter
 
+    # def setup_sampling_map(self):
+    #     print('Setting up sampling map')
+    #     self.head_relation_to_tail = [[None]*self.relation_size]*self.entity_size
+    #     self.tail_relation_to_head = [[None]*self.relation_size]*self.entity_size
+    #     print('Adding sampling dataset')
+
+    #     for (head, relation, tail) in self.train_triple:
+    #         if self.head_relation_to_tail[head][relation] != None:
+    #             self.head_relation_to_tail[head][relation].append(tail)
+    #         else:
+    #             self.head_relation_to_tail[head][relation] = [tail]
+    #         if self.tail_relation_to_head[tail][relation] != None:
+    #             self.tail_relation_to_head[tail][relation].append(head)
+    #         else:
+    #             self.tail_relation_to_head[tail][relation] = [head]
+    #     print('Finished setting up sampling map')
+    
+    def setup_sampling_map(self):
+        print('Setting up sampling map')
+        self.head_relation_to_tail = [{}]*self.relation_size
+        self.tail_relation_to_head = [{}]*self.relation_size
+        print('Adding sampling dataset')
+        for (head, relation, tail) in self.train_triple:
+            if head in self.head_relation_to_tail[relation].keys():
+                self.head_relation_to_tail[relation][head].append(tail)
+            else:
+                self.head_relation_to_tail[relation][head] = [tail]
+
+            if tail in self.tail_relation_to_head[relation].keys():
+                self.tail_relation_to_head[relation][tail].append(head)
+            else:
+                self.tail_relation_to_head[relation][tail] = [head]
+
+
+        print('Finished setting up sampling map')
+
     def preprocess(self, filter_occurance=5, init=False):
         '''Preprocess the dataset.
 
@@ -103,6 +139,30 @@ class DataLoader(object):
         self.train_triple_size = len(self.train_triple)
         self.valid_triple_size = len(self.valid_triple)
         self.test_triple_size = len(self.test_triple)
+    
+    def check_with_h_r(self, h, r, t):
+        if self.head_relation_to_tail[r][h] != None and t in self.head_relation_to_tail[r][h]:
+            return True
+        else:
+            return False
+
+    def check_with_t_r(self, h, r, t):
+        if self.tail_relation_to_head[r][t] != None and h in self.tail_relation_to_head[r][t]:
+            return True
+        else:
+            return False
+    
+    def get_t_list_with_h_r(self, h, r):
+        if self.head_relation_to_tail[r][h] == None:
+            return []
+        else:
+            return self.head_relation_to_tail[r][h]
+    
+    def get_h_list_with_r_t(self, r, t):
+        if self.tail_relation_to_head[r][t] == None:
+            return []
+        else:
+            return self.tail_relation_to_head[r][t]
         
         
         
@@ -111,3 +171,11 @@ if __name__ == "__main__":
     loader = DataLoader(dataset='WN18')
     loader.load_all()
     loader.preprocess(1, True)
+    loader.setup_sampling_map()
+    import time
+    start = time.time()
+    for i in range(10000):
+        if loader.check_with_h_r(1, 2, i):
+            print('hit: {}'.format(i))
+    end = time.time()
+    print(end - start)

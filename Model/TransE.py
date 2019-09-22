@@ -1,4 +1,5 @@
 import math
+import random
 import time
 
 import numpy as np
@@ -17,7 +18,7 @@ from utils.Log import Log
 class TransE(nn.Block):
     def __init__(self, entity_size=0, relation_size=0, entity_dim=2, relation_dim=2, 
                 negative_sampling_rate=0.5, sample_raw_negative=True, margin=0.1, 
-                ctx=None, logger=None, param_path='./param/', sparse=True, **kwargs):
+                ctx=None, logger=None, param_path='./param/', sparse=True, loader=DataLoader(), **kwargs):
         super(TransE, self).__init__(**kwargs)
         # self.entity_list = list(range(entity_size))
         # self.relation_list = list(range(relation_size))
@@ -26,8 +27,8 @@ class TransE(nn.Block):
         self.test_triple_set = []
         self.train_triple_set_nd = np.array([])
         self.train_triple_head_set_nd = np.array([])
-        self.head_relation_to_tail = []
-        self.tail_relation_to_head = []
+        # self.head_relation_to_tail = []
+        # self.tail_relation_to_head = []
         self.entity_size = entity_size
         self.relation_size = relation_size
         self.entity_dim = entity_dim
@@ -44,6 +45,13 @@ class TransE(nn.Block):
         self.param_path = param_path
         self.sparse = sparse
         self.training_log = []
+        self.loader = loader
+
+    # def load_map(self, head_relation_to_tail, tail_relation_to_head):
+    #     for i in head_relation_to_tail:
+    #         self.head_relation_to_tail.append(i)
+    #         print('ok')
+    #     self.tail_relation_to_head = tail_relation_to_head
 
     def load_relation_data(self, relation_data:list, mode='complex', type='train'):
         if mode == 'simple':
@@ -69,16 +77,16 @@ class TransE(nn.Block):
 
     def setup_sampling_map(self):
         print('Setting up sampling map')
-        self.head_relation_to_tail = [{}]*self.entity_size
-        self.tail_relation_to_head = [{}]*self.entity_size
+        self.head_relation_to_tail = [[None]*self.relation_size]*self.entity_size
+        self.tail_relation_to_head = [[None]*self.relation_size]*self.entity_size
         print('Adding sampling dataset')
 
         for (head, relation, tail) in self.train_triple_set:
-            if relation in self.head_relation_to_tail[head].keys():
+            if self.head_relation_to_tail[head][relation] != None:
                 self.head_relation_to_tail[head][relation].append(tail)
             else:
                 self.head_relation_to_tail[head][relation] = [tail]
-            if relation in self.tail_relation_to_head[tail].keys():
+            if self.tail_relation_to_head[tail][relation] != None:
                 self.tail_relation_to_head[tail][relation].append(head)
             else:
                 self.tail_relation_to_head[tail][relation] = [head]
@@ -98,54 +106,57 @@ class TransE(nn.Block):
 
     def negative_sampling(self, start, end, negative_sampling_rate=0.5, max_round=20, sparse=True):
         '''Decrepted'''
+        t0 = time.time()
         triple_set = self.train_triple_set[start:end]
-        start = time.time()
-        import random
+        t01 = time.time()
         negative_sample = []
         if sparse:
             fetch_time = 0.0
             valid_time = 0.0
+            special = 0.0
             for (head, relat, tail) in triple_set:
-                # TODO
-                # for i in range(max_round):
-                #     head_idx = random.randint(0, self.entity_size-1)
-                #     if head_idx == tail:
-                #         continue
-                #     if (head_idx, relat, tail) not in triple_set:
-                #         negative_sample.append((head, relat, tail, head_idx, tail))
-                #         break
-
-                for i in range(max_round):
-                    if random.random()<0.5:
-                        t1 = time.time()
-                        tail_idx = random.randint(0, self.entity_size-1)
-                        t2 = time.time()
+                if random.random()<0.5:
+                    t1 = time.time()
+                    if not self.sample_raw_negative:
+                        positive_tail_list = self.loader.get_t_list_with_h_r(head, relat)
+                    t2 = time.time()
+                    for i in range(max_round):
+                        ts = time.time()
+                        # tail_idx = random.randint(0, self.entity_size-1)
+                        tail_idx = math.floor(random.random()*self.entity_size)
+                        special += time.time() - ts
                         if head == tail_idx:
                             continue
-                        if (self.sample_raw_negative) \
-                                or (head, relat, tail_idx) not in self.train_triple_set:
-                                # or (relat in self.head_relation_to_tail[head].keys() and tail_idx not in self.head_relation_to_tail[head][relat]):
+                        if (self.sample_raw_negative) or not tail_idx in positive_tail_list:
+                                # or (self.head_relation_to_tail[head][relat] != None and tail_idx not in self.head_relation_to_tail[head][relat]):
+                                # or (head, relat, tail_idx) not in self.train_triple_set:
                             negative_sample.append((head, relat, tail, head, tail_idx))
                             break
-                        t3 = time.time()
-                        fetch_time += t2 - t1
-                        valid_time += t3 - t2
-                    else:
-                        t1 = time.time()
-                        head_idx = random.randint(0, self.entity_size-1)
-                        t2 = time.time()
+                    t3 = time.time()
+                    fetch_time += t2 - t1
+                    valid_time += t3 - t2
+                else:
+                    t1 = time.time()
+                    if not self.sample_raw_negative:
+                        positive_head_list = self.loader.get_h_list_with_r_t(relat, tail)
+                    t2 = time.time()
+                    for i in range(max_round):
+                        ts = time.time()
+                        # head_idx = random.randint(0, self.entity_size-1)
+                        head_idx = math.floor(random.random()*self.entity_size)
+                        special += time.time() - ts
                         if tail == head_idx:
                             continue
-                        if (self.sample_raw_negative) \
-                                or (head_idx, relat, tail) not in self.train_triple_set:
-                                # or (relat in self.tail_relation_to_head[tail].keys() and head_idx not in self.tail_relation_to_head[tail][relat]):
+                        if (self.sample_raw_negative) or not head_idx in positive_head_list:
+                                # or (self.tail_relation_to_head[tail][relat] != None and head_idx not in self.tail_relation_to_head[tail][relat]):
+                                # or (head_idx, relat, tail) not in self.train_triple_set:
                             negative_sample.append((head, relat, tail, head_idx, tail))
                             break
-                        t3 = time.time()
-                        fetch_time += t2 - t1
-                        valid_time += t3 - t2
-            self.logger.error("Negative sampling time: {} {} {}".format(str(fetch_time),
-                        str(valid_time),str(time.time()-start)))
+                    t3 = time.time()
+                    fetch_time += t2 - t1
+                    valid_time += t3 - t2
+            self.logger.error("Negative sampling time: {} {} {} {} {}".format(str(t01-t0), str(fetch_time),
+                        str(valid_time), str(special), str(time.time()-t0)))
         else:
             #TODO raw
             for (head, relat, tail) in triple_set:
@@ -166,7 +177,7 @@ class TransE(nn.Block):
                         sample_source.append((head, tail_idx))
                 choice = random.choice(sample_source)
                 negative_sample.append((head, relat, tail, *choice))            # TODO
-        self.logger.info('Negative sampling inside time: {}'.format(str(time.time()-start)))
+        self.logger.info('Negative sampling inside time: {}'.format(str(time.time()-t0)))
         return negative_sample
     
     def negative_sampling_new(self, start, end, negative_sampling_rate=0.5, max_round=20, sparse=True):
@@ -212,6 +223,7 @@ class TransE(nn.Block):
                                     start, min(end, len(self.train_triple_set)), 
                                     self.negative_sampling_rate, 
                                     sparse=self.sparse)
+        t2 = time.time()
         while len(new_train_triple_set) == 0:
             # TODO: possible bug
             new_train_triple_set = self.negative_sampling(
@@ -219,32 +231,32 @@ class TransE(nn.Block):
                                         self.negative_sampling_rate, 
                                         sparse=self.sparse)
             self.logger.warning('Negative sampling failed. repeat the process.')
+        t3 = time.time()
         if len(self.train_triple_set[start:end]) != len(new_train_triple_set):
             self.logger.warning('samping flaw: {} -> {}'.format(str(len(self.train_triple_set[start:end])), str(len(new_train_triple_set))))
         # logger.debug(new_train_triple_set)
-        t2 = time.time()
+        t4 = time.time()
         h_i = nd.array([triple[0] for triple in new_train_triple_set], ctx=self.ctx)
         r_i = nd.array([triple[1] for triple in new_train_triple_set], ctx=self.ctx)
         t_i = nd.array([triple[2] for triple in new_train_triple_set], ctx=self.ctx)
         h_hat_i = nd.array([triple[3] for triple in new_train_triple_set], ctx=self.ctx)
         t_hat_i = nd.array([triple[4] for triple in new_train_triple_set], ctx=self.ctx)
-        t3 = time.time()
 
         h = self.entity_embedding(h_i)
         t = self.entity_embedding(t_i)
         r = self.relation_embedding(r_i)
         h_hat = self.entity_embedding(h_hat_i)
         t_hat = self.entity_embedding(t_hat_i)
-        t4 = time.time()
+        t5 = time.time()
         
         L = self.loss_function(h, r, t, h_hat, t_hat)
         t5 = time.time()
-        # self.logger.warning('forward time details: {} {} {} {}'.format(
-        #     str(t2 - t1),
-        #     str(t3 - t2),
-        #     str(t4 - t3),
-        #     str(t5 - t4)
-        # ))
+        self.logger.info('forward time details: {} {} {} {}'.format(
+            str(t2 - t1),
+            str(t3 - t2),
+            str(t4 - t3),
+            str(t5 - t4)
+        ))
         return L
 
     def backward(self):
@@ -295,29 +307,6 @@ class TransE(nn.Block):
             tails_embedding = self.entity_embedding(tails_idx.reshape(len(heads_idx),1))
             # triple_embedding = nd.concat(heads_embedding, relations_embedding, tails_embedding)
             return (heads_embedding, relations_embedding, tails_embedding)
-    
-    def predict_with_h_r_old(self, head_list, relation_list, k=3, ord=1):
-        '''Deprecated'''
-        heads = self.entity_embedding(head_list)
-        relations = self.relation_embedding(relation_list)
-        tails = self.entity_embedding(nd.array(list(range(self.entity_size)), ctx=self.ctx))
-        prediction = []
-        prediction_d = []
-        for i in range(len(head_list)):
-            prediction_i = []
-            prediction_d_i = []
-            candidates = self.distance(heads[i], relations[i], tails)
-            candidates = candidates.asnumpy()
-            ceil = candidates.max()+1
-            for j in range(len(k)):
-                min_idx = candidates.argmin()
-                if candidates[min_idx] != ceil:
-                    prediction_i.append(min_idx)
-                    prediction_d_i.append(candidates[min_idx])
-                    candidates[min_idx] = ceil
-            prediction.append(prediction_i)
-            prediction_d.append(prediction_d_i)
-        return prediction, prediction_d
         
     def predict_with_h_r(self, head_list, relation_list, tail_list, k=[3], ord=1):
         heads = self.entity_embedding(head_list)
@@ -331,6 +320,27 @@ class TransE(nn.Block):
         mean_rank = 0
         for i in range(len(head_list)):
             candidates = self.distance(heads[i], relations[i], tails)
+            flag = candidates <= distance[i]
+            count = flag.sum().asscalar()
+            mean_rank += count
+            for j in range(len(k)):
+                if count<=k[j]:
+                    all_hit[j] += 1
+        mean_rank /= len(head_list)
+        return (all_hit, mean_rank)
+
+    def predict_with_r_t(self, head_list, relation_list, tail_list, k=[3], ord=1):
+        targets = self.entity_embedding(head_list)
+        relations = self.relation_embedding(relation_list)
+        tails = self.entity_embedding(tail_list)
+        heads = self.entity_embedding(nd.array(list(range(self.entity_size)), ctx=self.ctx))
+
+        distance = self.distance(targets, relations, tails)
+        
+        all_hit = [0]*len(k)
+        mean_rank = 0
+        for i in range(len(head_list)):
+            candidates = self.distance(heads, relations[i], tails[i])
             flag = candidates <= distance[i]
             count = flag.sum().asscalar()
             mean_rank += count
@@ -356,7 +366,7 @@ class TransE(nn.Block):
         if len(self.training_log) == epoch_num:
             self.training_log.append((epoch_num, total_loss, epoch_time))
 
-    def evaluate(self, mode='test', k=[3], ord=1):
+    def evaluate(self, mode='test', evaluation_type='tail_prediction', k=[3], ord=1):
         if mode == 'test':
             head_list = nd.array([i[0] for i in self.test_triple_set], ctx=self.ctx)
             relation_list = nd.array([i[1] for i in self.test_triple_set], ctx=self.ctx)
@@ -367,8 +377,13 @@ class TransE(nn.Block):
             relation_list = nd.array([i[1] for i in self.valid_triple_set], ctx=self.ctx)
             tail_list = nd.array([i[2] for i in self.valid_triple_set], ctx=self.ctx)
         total = len(tail_list)
+        print('Evaluation_type: {}'.format(evaluation_type))
         t1 = time.time()
-        (all_hit, mean_rank) = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
+        if evaluation_type == 'tail_prediction':
+            (all_hit, mean_rank) = self.predict_with_h_r(head_list, relation_list, tail_list, k, ord)
+        elif evaluation_type == 'head_prediction':
+            (all_hit, mean_rank) = self.predict_with_r_t(head_list, relation_list, tail_list, k, ord)
+
         t2 = time.time()
         print('Prediction completed, time used: {}'.format(str(t2-t1)))
         t3 = time.time()

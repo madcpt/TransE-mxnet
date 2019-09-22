@@ -40,4 +40,8 @@ if __name__ == '__main__':
     (total, hit) = net.evaluate(k=k)
     for i in range(len(k)):
         print('Evaluation time: {} Hit@ {}: {} {}/{}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total), str(int(hit[i])),  str(int(total))))
+
+    (total, hit) = net.evaluate(k=k, evaluation_type='head_prediction')
+    for i in range(len(k)):
+        print('Evaluation time: {} Hit@ {}: {} {}/{}'.format(str(time.time()-checkpoint), str(k[i]), str(hit[i]*1.0/total), str(int(hit[i])),  str(int(total))))
     # TODO
